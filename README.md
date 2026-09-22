@@ -84,6 +84,32 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地开源复现
 
 > ⚠️ 官方 API 与开源复现均未公布中文支持，中文车载话语属于分布外场景，使用前请先用测试集实测（见下）。
 
+### 实测结果（openjev 本地后端，2026-09-22）
+
+硬件：Apple M4 Pro / 24GB / MPS；数据：`test/测试集.xlsx` 全部 51 条；gold：`test/测试集_结果.xlsx`。
+
+**准确率（零样本中文，阈值 0.5）**——`JEV_BACKEND=openjev python process_test_set.py --skip-chat --out test/测试集_结果_jev_openjev.xlsx --log test/处理日志_jev_openjev.txt` + `python compare_results.py test/测试集_结果_jev_openjev.xlsx`：
+
+| 指标 | 数值 |
+|---|---|
+| 人名级 P / R / F1 | 0.253 / 0.532 / 0.342（TP=25 FP=74 FN=22） |
+| 命中人名的位置 / 身份准确率 | 0.680 / 0.600 |
+| 行级完全一致 | 8/50 |
+
+结论：**英文训练的 open-jev 零样本中文不可用**——误报集中在品牌名（日产）、方位词（副驾/右边）和动词短语，模型对中文片段的 is_person 判别力失效（召回尚可、精确率崩盘）。
+
+**性能**——`python bench_perf.py`（预热 3 条、正式 2 轮，原始数据 `test/perf_results.json`）：
+
+| 指标 | seq（默认） | batch |
+|---|---|---|
+| 延迟 p50 / p95 | 1.353s / 3.913s | 1.876s / 4.801s |
+| 吞吐 | 38.8 条/分钟 | 29.2 条/分钟 |
+| 模型加载 / 峰值 RSS | 4.4s / 0.7GB | 2.0s / 0.89GB |
+
+- 延迟随问题数**严格线性**（8问 0.34s → 116问 4.90s，约 42ms/问题）：512-token 上下文把问题切成串行分块，「加问题不加时」只在官方 API 的单请求架构下成立
+- 批量前向（`JEV_OPENJEV_BATCHED=1`）与串行**数值一致**（160 问题最大概率差 9.8e-07）但在 MPS 上**慢 33%**（collator 批内 padding 到最大尺寸，浪费超过批处理收益），故默认串行
+- 旧 LLM 基线（localhost:13984）与官方 API 本轮不可测（端点/key 不可得），以上仅为 open-jev 本地后端的绝对值，不构成新旧对比
+
 ## 环境准备
 
 1. 安装依赖:
