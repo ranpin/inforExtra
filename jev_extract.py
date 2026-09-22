@@ -201,31 +201,35 @@ class TypeSafeBackend:
 class OpenJevBackend:
     """本地开源复现（kotoba-lang/typed-decisions）。
 
-    DeBERTa 版上下文只有 512 token，因此按 token 预算把问题分块，
-    每块一次前向，结果合并返回。
+    DeBERTa 版上下文只有 512 token（中文在英文词表下 token 膨胀严重，
+    超限 collator 会直接抛 ValueError），因此用模型自带 tokenizer
+    精确计数，按预算把问题分块，每块一次前向，结果合并返回。
     """
-
-    CONTEXT_BUDGET = 512
 
     def __init__(self):
         from typed_decisions.open_jev import OpenJev
         self.model = OpenJev.from_pretrained(OPEN_JEV_MODEL)
-
-    @staticmethod
-    def _tokens(s):
-        # 粗估：中文约 1 字 1 token，拉丁词约 1 词 1-2 token
-        return len(s)
+        self._collator = self.model.collator
+        # 实测（M4 Pro/MPS, bench_perf.py）：批量前向比串行慢 ~33%（p50 1.88s vs 1.35s），
+        # 原因是 collator 把批内分块 padding 到最大尺寸，浪费超过批处理收益。
+        # 数值上两者一致（160 问题最大概率差 9.8e-07），故默认串行，批量仅留作 CUDA 场景实验。
+        self.batched = os.getenv("JEV_OPENJEV_BATCHED", "0") == "1"
+        self.last_chunks = 0
 
     def _question_tokens(self, q):
-        n = self._tokens(q["instructions"]) + 8
-        n += sum(self._tokens(o) + 4 for o in q.get("criteria", {}))
+        # 与 collator.encode_one 相同的计数：1 + 指令 + 每选项 (1 + token 数)
+        n = 1 + len(self._collator._ids(q["instructions"]))
+        n += sum(1 + len(self._collator._ids(o)) for o in q.get("criteria", {}))
         return n
 
     def _pack(self, state, questions):
-        budget = self.CONTEXT_BUDGET - self._tokens(state) - 32
+        state_tok = min(len(self._collator._ids(state)), self._collator.max_state)
+        budget = self._collator.max_len - 3 - state_tok - 8
         chunks, cur, used = [], {}, 0
         for qid, q in questions.items():
             cost = self._question_tokens(q)
+            if cost > budget:
+                raise RuntimeError(f"单个问题超出 open-jev 上下文预算: {qid}")
             if cur and used + cost > budget:
                 chunks.append(cur)
                 cur, used = {}, 0
@@ -235,22 +239,61 @@ class OpenJevBackend:
             chunks.append(cur)
         return chunks
 
+    @staticmethod
+    def _to_openjev(q):
+        if q["type"] == "choice":
+            return {"type": "choice", "instructions": q["instructions"],
+                    "options": list(q["criteria"].keys())}
+        return {"type": q["type"], "instructions": q["instructions"]}
+
     def ask(self, state, questions):
+        chunks = self._pack(state, questions)
+        self.last_chunks = len(chunks)
+        if self.batched:
+            return self._ask_batched(state, chunks)
         out = {}
-        for chunk in self._pack(state, questions):
-            qlist = []
-            for q in chunk.values():
-                if q["type"] == "choice":
-                    qlist.append({
-                        "type": "choice",
-                        "instructions": q["instructions"],
-                        "options": list(q["criteria"].keys()),
-                    })
-                else:
-                    qlist.append({"type": q["type"], "instructions": q["instructions"]})
-            results = self.model.decide(state, qlist)
+        for chunk in chunks:
+            results = self.model.decide(
+                state, [self._to_openjev(q) for q in chunk.values()])
             for qid, r in zip(chunk.keys(), results):
                 out[qid] = _normalize_answer(r)
+        return out
+
+    def _ask_batched(self, state, chunks):
+        """所有分块打包成一次 batch 前向。
+
+        与 OpenJev.decide() 逐式对应（同样的 _question/collator/readout），
+        只是 batch 维 > 1：N 个分块一次前向，而不是 N 次串行前向。
+        """
+        import torch
+        from typed_decisions.schema import readout
+        oj = self.model
+        batch_qs = [
+            [oj._question(i, self._to_openjev(q)) for i, q in enumerate(chunk.values())]
+            for chunk in chunks
+        ]
+        b = oj.collator([(state, qs) for qs in batch_qs], oj.device)
+        with torch.no_grad():
+            logits = oj.model(b["input_ids"], b["attention_mask"], b["opt_pos"],
+                              b["opt_mask"], b["q_pos"], b["seg"]).float()
+        probs = (logits / oj.model.temperature).softmax(-1)
+        out = {}
+        for bi, (chunk, qs) in enumerate(zip(chunks, batch_qs)):
+            qids = list(chunk.keys())
+            for qi, q in enumerate(qs):
+                p = probs[bi, qi, :len(q.options)].tolist()
+                r = readout(q.kind, p)
+                if q.kind == "choice":
+                    ans = {"choice": q.options[r["choice"]],
+                           "probabilities": dict(zip(q.options, p)),
+                           "confidence": r["confidence"]}
+                elif q.kind == "score":
+                    ans = {"score": r["score"],
+                           "probabilities": dict(zip(q.options, p)),
+                           "confidence": r["confidence"]}
+                else:
+                    ans = {"noul": r["noul"]}
+                out[qids[qi]] = ans
         return out
 
 
@@ -316,26 +359,44 @@ def _answer_value(answers, qid, kind):
     return a.get(kind)
 
 
+# 每次 extract_entities 调用的性能记录（bench_perf.py 读取；JEV_PERF=1 时打印）
+PERF = {}
+
+
 def extract_entities(user_input):
     """与旧 extract_entities_with_model 相同的契约：输入文本，返回
     {"persons": [{"name", "identity", "location"}]}。
     """
+    t_start = time.perf_counter()
+    PERF.update({"n_candidates": 0, "n_questions_r1": 0, "n_chunks_r1": 0,
+                 "n_questions_r2": 0, "t_candidates": 0.0, "t_round1": 0.0,
+                 "t_round2": 0.0, "t_total": 0.0})
     try:
         backend = get_backend()
     except Exception as e:  # noqa: BLE001
         print(f"Jev 后端不可用: {e}")
         return {"persons": []}
 
+    t0 = time.perf_counter()
     cands = generate_candidates(user_input)
+    PERF["t_candidates"] = time.perf_counter() - t0
+    PERF["n_candidates"] = len(cands)
     if not cands:
+        PERF["t_total"] = time.perf_counter() - t_start
         return {"persons": []}
 
+    questions = build_questions(cands)
+    PERF["n_questions_r1"] = len(questions)
+    t0 = time.perf_counter()
     try:
-        answers = backend.ask(user_input, build_questions(cands))
+        answers = backend.ask(user_input, questions)
     except Exception as e:  # noqa: BLE001
         print(f"Jev 第一轮调用失败: {e}")
         return {"persons": []}
+    PERF["t_round1"] = time.perf_counter() - t0
+    PERF["n_chunks_r1"] = getattr(backend, "last_chunks", 0) or 0
     if not answers:  # dryrun
+        PERF["t_total"] = time.perf_counter() - t_start
         return {"persons": []}
 
     passing = []
@@ -353,11 +414,15 @@ def extract_entities(user_input):
 
     winners = list(singletons)
     if ambiguous:
+        cluster_questions = build_cluster_questions(ambiguous)
+        PERF["n_questions_r2"] = len(cluster_questions)
+        t0 = time.perf_counter()
         try:
-            answers2 = backend.ask(user_input, build_cluster_questions(ambiguous))
+            answers2 = backend.ask(user_input, cluster_questions)
         except Exception as e:  # noqa: BLE001
             print(f"Jev 第二轮消歧失败，按 is_person 概率回退: {e}")
             answers2 = {}
+        PERF["t_round2"] = time.perf_counter() - t0
         for j, cluster in enumerate(ambiguous):
             picked = _answer_value(answers2, f"clu{j}", "choice")
             if picked == "都不是":
@@ -379,6 +444,13 @@ def extract_entities(user_input):
             "identity": "" if ident == NO_IDENTITY else ident,
             "location": "" if loc == NO_LOCATION else loc,
         })
+    PERF["t_total"] = time.perf_counter() - t_start
+    if os.getenv("JEV_PERF"):
+        print(f"[perf] 候选={PERF['n_candidates']} 问题={PERF['n_questions_r1']}"
+              f"+{PERF['n_questions_r2']} 块={PERF['n_chunks_r1']} "
+              f"候选生成={PERF['t_candidates']*1000:.1f}ms "
+              f"一轮={PERF['t_round1']:.2f}s 二轮={PERF['t_round2']:.2f}s "
+              f"总计={PERF['t_total']:.2f}s")
     return {"persons": persons}
 
 
