@@ -98,17 +98,22 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地开源复现
 
 结论：**英文训练的 open-jev 零样本中文不可用**——误报集中在品牌名（日产）、方位词（副驾/右边）和动词短语，模型对中文片段的 is_person 判别力失效（召回尚可、精确率崩盘）。
 
-**性能**——`python bench_perf.py`（预热 3 条、正式 2 轮，原始数据 `test/perf_results.json`）：
+**性能**——`python bench_perf.py`（Jev 侧）+ `python bench_baseline_llm.py`（旧管线基线，需本机 13984 边车在跑）；预热 3 条、正式 2 轮，原始数据 `test/perf_results.json` / `test/perf_baseline_llm.json`：
 
-| 指标 | seq（默认） | batch |
-|---|---|---|
-| 延迟 p50 / p95 | 1.353s / 3.913s | 1.876s / 4.801s |
-| 吞吐 | 38.8 条/分钟 | 29.2 条/分钟 |
-| 模型加载 / 峰值 RSS | 4.4s / 0.7GB | 2.0s / 0.89GB |
+| 指标（51 条测试集，同机 M4 Pro） | 旧管线：Qwen-2.5-Omni-7B 提取调用 | openjev-seq（默认） | openjev-batch |
+|---|---|---|---|
+| 延迟 p50 | **0.745s** | 1.353s | 1.876s |
+| 延迟 p95 | **1.424s** | 3.913s | 4.801s |
+| 延迟均值 | **0.876s** | 1.546s | 2.052s |
+| 每次调用 token | 1400 prompt + 39 completion | 本地机时（加载 4.4s，RSS 0.7GB） | 同左（RSS 0.89GB） |
+| 中文准确率 | 10.23 全量通过（即 gold） | F1=0.342 | 同左（数值一致） |
 
-- 延迟随问题数**严格线性**（8问 0.34s → 116问 4.90s，约 42ms/问题）：512-token 上下文把问题切成串行分块，「加问题不加时」只在官方 API 的单请求架构下成立
-- 批量前向（`JEV_OPENJEV_BATCHED=1`）与串行**数值一致**（160 问题最大概率差 9.8e-07）但在 MPS 上**慢 33%**（collator 批内 padding 到最大尺寸，浪费超过批处理收益），故默认串行
-- 旧 LLM 基线（localhost:13984）与官方 API 本轮不可测（端点/key 不可得），以上仅为 open-jev 本地后端的绝对值，不构成新旧对比
+结论：
+- **本地 open-jev 在延迟和准确率上双输**：旧管线走边车到平台服务（p50 0.745s）比本地 DeBERTa 分块前向（p50 1.353s）快约 1.8 倍，且中文可用。Jev 的价值主张（70–500ms + 结构化保证）只在官方 API 单请求架构下成立，开源参考实现撑不起来
+- openjev 延迟随问题数**严格线性**（8问 0.34s → 116问 4.90s，约 42ms/问）：512-token 上下文把问题切成串行分块，「加问题不加时」不成立
+- 批量前向（`JEV_OPENJEV_BATCHED=1`）与串行**数值一致**（160 问题最大概率差 9.8e-07）但在 MPS 上**慢 33%**（collator 批内 padding 到最大尺寸），故默认串行
+- ⚠️ 旧代码兼容性发现：main 分支提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响，错误发生在响应接收后）。基线基准从 git 历史加载旧函数原样复现了此行为；如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
+- 官方 API（typesafe 后端）仍待 key，拿到后补测第三列
 
 ## 环境准备
 

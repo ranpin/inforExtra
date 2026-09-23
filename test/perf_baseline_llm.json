@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "date": "2026-09-23 19:55:59",
+    "pipeline": "old-llm-extraction (main branch, mega-prompt)",
+    "model": "qwen2.5-omni-7b-aliyun",
+    "endpoint": "localhost:13984 sidecar -> platform",
+    "warmup": 3,
+    "rounds": 2,
+    "call_gap_s": 1.0
+  },
+  "n_calls": 102,
+  "wall_seconds_incl_gap": 191.6,
+  "latency_p50_s": 0.745,
+  "latency_p95_s": 1.424,
+  "latency_mean_s": 0.876,
+  "latency_min_s": 0.377,
+  "latency_max_s": 6.288,
+  "tokens_mean_prompt": 1400.2,
+  "tokens_mean_completion": 38.6
+}
