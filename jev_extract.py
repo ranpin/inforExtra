@@ -22,46 +22,104 @@ import time
 
 # ---------------------------------------------------------------- 配置
 
-JEV_BACKEND = os.getenv("JEV_BACKEND", "auto")  # auto | typesafe | openjev | dryrun
+JEV_BACKEND = os.getenv("JEV_BACKEND", "auto")  # auto | typesafe | openjev | laya | dryrun
 TYPESAFE_API_KEY = os.getenv("TYPESAFE_API_KEY", "")
 TYPESAFE_API_URL = os.getenv("TYPESAFE_API_URL", "https://api.typesafe.ai/v1/systemone")
 JEV_MODEL = os.getenv("JEV_MODEL", "jev-latest")
 OPEN_JEV_MODEL = os.getenv("OPEN_JEV_MODEL", "com-kotobalabs/open-jev-deberta-v3-large")
+LAYA_MODEL = os.getenv("LAYA_MODEL", "convaiinnovations/laya")
+LAYA_SUBFOLDER = os.getenv("LAYA_SUBFOLDER", "multilingual")  # 中文必须走 multilingual
 
 IS_PERSON_THRESHOLD = float(os.getenv("JEV_IS_PERSON_THRESHOLD", "0.5"))
 NEGATED_THRESHOLD = float(os.getenv("JEV_NEGATED_THRESHOLD", "0.5"))
 
-MAX_CANDIDATES = int(os.getenv("JEV_MAX_CANDIDATES", "60"))
+# 组装模式：fanout=每候选独立 noul 扇出（openjev/typesafe 验证过）；
+# forced=迭代强制选择（laya 验证形态：neg 门对 laya 零样本是噪声，
+# 强制选择让候选在同一 softmax 内竞争，且天然处理否定句）
+ASSEMBLY_MODE = os.getenv("JEV_ASSEMBLY", "fanout")
+FORCED_MIN_P = float(os.getenv("JEV_FORCED_MIN_P", "0.3"))
+FORCED_MAX_PERSONS = int(os.getenv("JEV_FORCED_MAX_PERSONS", "5"))
+FORCED_NO_PERSON = "没有人物"
+FORCED_INSTRUCTIONS = (
+    "这句话中提到的某个人物的名字或称呼是哪个？只根据这句话判断，"
+    "品牌名、车内位置、方位词、普通名词都不算人物称呼；"
+    "被否定或纠正的称呼（如『我不是X』『别叫我X』中的X）也不算。"
+    "如果这句话没有提到任何人物，选『没有人物』。"
+)
 
-# 候选片段中出现这些字符即丢弃（功能词/动词，几乎不可能出现在姓名或称谓里）
+MAX_CANDIDATES = int(os.getenv("JEV_MAX_CANDIDATES", "60"))
+# 候选过滤模式：span=全片段枚举（默认）；surname=只保留姓氏开头/小X/拉丁词
+# （surname 模式把「品牌名/方位词/普通名词」类误报消灭在代码层，模型只裁决强候选）
+CANDIDATE_FILTER = os.getenv("JEV_CANDIDATE_FILTER", "span")
+
+# 常见单字姓（百家姓 Top ~100；刻意排除 司/老/同 等易与普通词冲突的生僻姓）
+SURNAME_CHARS = set(
+    "王李张刘陈杨黄赵吴周徐孙马朱胡郭何林罗高郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘"
+    "于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江"
+    "尹薛闫段雷侯龙史陶黎贺顾毛郝龚万钱严覃武戴莫孔向汤"
+)
+COMPOUND_SURNAMES = frozenset((
+    "欧阳", "司马", "诸葛", "上官", "夏侯", "皇甫", "尉迟", "公孙", "令狐", "长孙",
+    "慕容", "司徒", "端木", "东方", "独孤", "南宫", "呼延", "西门", "第五", "淳于",
+    "单于", "太叔", "申屠", "仲孙", "轩辕", "百里", "东郭", "南门", "羊舌", "微生",
+))
+
+# 候选片段中出现这些字符即丢弃（功能词/动词/问候语，几乎不可能出现在姓名或称谓里）
 STOPWORD_CHARS = set(
     "的我你他她它是在坐了有叫别不这那就都也还很吗吧啊呢给和跟向对把让被从到说"
+    "快打招呼请问候兴见真早"
 )
 
 LOCATION_OPTIONS = [
-    "主驾", "副驾", "副驾驶", "前排", "后排",
+    "主驾", "副驾", "前排", "后排",
     "后排左边", "后排右边", "左后", "左后座", "右后", "右后座",
     "左边", "右边", "未提及",
 ]
 
+# 未提及放第一位：laya 对选项顺序有位置偏差，身份 gold 绝大多数为空，
+# 让偏差偏向『未提及』而不是幻觉出身份
 IDENTITY_OPTIONS = [
-    "司机", "妻子", "丈夫", "儿子", "女儿", "孩子", "同事", "同学",
-    "老师", "工程师", "朋友", "老板", "部长", "医生", "未提及",
+    "未提及", "司机", "妻子", "丈夫", "儿子", "女儿", "孩子", "同事", "同学",
+    "老师", "工程师", "朋友", "老板", "部长", "医生",
 ]
 
-LOCATION_QUESTION = "这个人物在这句话中坐在车内的哪个位置？按句子原话选择最匹配的说法"
-IDENTITY_QUESTION = "这个人物在这句话中的身份或称谓是什么"
+LOCATION_QUESTION = (
+    "这个人物在这句话中坐在车内的哪个位置？按句子原话选择最匹配的说法，"
+    "注意严格区分左边和右边；句子没说位置就选未提及"
+)
+IDENTITY_QUESTION = (
+    "这个人物在这句话中的身份或称谓是什么？只有句子明确说明了身份"
+    "（如『同事小李』『我的孩子小宝』『司机王五』）才选对应项，没有明确说明就选未提及"
+)
 NO_LOCATION = "未提及"
 NO_IDENTITY = "未提及"
 
 
 # ---------------------------------------------------------------- 候选生成
 
+def _keep_cjk_span(s):
+    """surname 过滤模式：只保留像中文人名的片段。
+
+    规则：单字姓开头的 2-3 字片段 / 复姓开头的 3-4 字片段 / 小X（2-3 字）。
+    span 模式（默认）全部保留。
+    """
+    if CANDIDATE_FILTER != "surname":
+        return True
+    w = len(s)
+    if s[0] == "小" and 2 <= w <= 3:
+        return True
+    if 2 <= w <= 3 and s[0] in SURNAME_CHARS:
+        return True
+    if 3 <= w <= 4 and s[:2] in COMPOUND_SURNAMES:
+        return True
+    return False
+
+
 def generate_candidates(text):
     """枚举人名候选片段，返回 [{'id', 'start', 'end', 'text'}, ...]。
 
-    中文取所有 2-4 字子串（含功能词的丢弃），拉丁文取连续字母词。
-    同文本只保留首次出现位置。
+    中文取所有 2-4 字子串（含功能词的丢弃，surname 模式下再过姓氏规则），
+    拉丁文取连续字母词。同文本只保留首次出现位置。
     """
     seen = {}
     cands = []
@@ -81,6 +139,8 @@ def generate_candidates(text):
             if not re.fullmatch(r"[\u4e00-\u9fff]+", s):
                 continue
             if any(ch in STOPWORD_CHARS for ch in s):
+                continue
+            if not _keep_cjk_span(s):
                 continue
             add(i, i + width, s)
 
@@ -118,6 +178,21 @@ def build_questions(cands):
 def overlaps(a, b):
     """两个候选在原文中的字符区间是否重叠（同一人物的不同写法会重叠）。"""
     return not (a["end"] <= b["start"] or b["end"] <= a["start"])
+
+
+def _identity_supported(text, name, identity):
+    """身份词必须在原文中与人名相邻出现（模型提议，文本证据裁决）。
+
+    laya 零样本会高置信度幻觉身份（坐在主驾→司机 0.97），用原文字面
+    证据门控：身份词不在人名附近出现就丢弃。
+    """
+    if not identity:
+        return True
+    idx = text.find(name)
+    if idx < 0:
+        return False
+    window = text[max(0, idx - 4):idx + len(name) + 4]
+    return identity in window
 
 
 def group_overlapping(passing):
@@ -297,6 +372,48 @@ class OpenJevBackend:
         return out
 
 
+class LayaBackend:
+    """Laya（convaiinnovations，Apache-2.0）本地后端。
+
+    与 open-jev 的关键差异：所有问题在单次前向中回答（无 512-token 分块），
+    multilingual checkpoint（mmBERT-base）支持 CJK。
+
+    已知怪癖（模型卡 Honest Limits）：noul 在明确为真的输入上可能只给 ~0.5，
+    官方建议改写成中性键两选项 choice。本后端自动做该改写并把 P("A")
+    映射回 noul 概率，管线其余部分（阈值/组装）不感知。
+    """
+
+    def __init__(self):
+        import laya
+        self.agent = laya.load(LAYA_MODEL, subfolder=LAYA_SUBFOLDER)
+        self.last_chunks = 1  # 单次前向，兼容 PERF 统计
+
+    def ask(self, state, questions):
+        transformed, noul_ids = {}, set()
+        for qid, q in questions.items():
+            if q["type"] == "noul":
+                noul_ids.add(qid)
+                transformed[qid] = {
+                    "type": "choice",
+                    "instructions": q["instructions"] + "？",
+                    "criteria": {
+                        "A": "是，" + q["instructions"],
+                        "B": "否，" + q["instructions"] + " 不成立",
+                    },
+                }
+            else:
+                transformed[qid] = q
+        result = self.agent.predict(state, transformed)
+        out = {}
+        for qid, ans in result.get("answers", {}).items():
+            if qid in noul_ids:
+                probs = ans.get("probabilities") or {}
+                out[qid] = {"noul": float(probs.get("A", 0.0))}
+            else:
+                out[qid] = _normalize_answer(ans)
+        return out
+
+
 class DryRunBackend:
     """不调用模型，只打印将要发送的请求，便于离线检查问题设计。"""
 
@@ -328,20 +445,27 @@ def get_backend():
             choice = "typesafe"
         else:
             try:
-                import typed_decisions  # noqa: F401
-                choice = "openjev"
+                import laya  # noqa: F401
+                choice = "laya"
             except ImportError:
-                raise RuntimeError(
-                    "未找到可用的 Jev 后端：请设置 TYPESAFE_API_KEY（官方 API），"
-                    "或 pip install git+https://github.com/kotoba-lang/typed-decisions"
-                    "（本地 open-jev），或设 JEV_BACKEND=dryrun 离线查看请求结构"
-                )
+                try:
+                    import typed_decisions  # noqa: F401
+                    choice = "openjev"
+                except ImportError:
+                    raise RuntimeError(
+                        "未找到可用的 Jev 后端：请设置 TYPESAFE_API_KEY（官方 API），"
+                        "或 pip install laya（本地 Laya，多语言），"
+                        "或 pip install git+https://github.com/kotoba-lang/typed-decisions"
+                        "（本地 open-jev），或设 JEV_BACKEND=dryrun 离线查看请求结构"
+                    )
     if choice == "typesafe":
         if not TYPESAFE_API_KEY:
             raise RuntimeError("JEV_BACKEND=typesafe 需要 TYPESAFE_API_KEY")
         _backend = TypeSafeBackend()
     elif choice == "openjev":
         _backend = OpenJevBackend()
+    elif choice == "laya":
+        _backend = LayaBackend()
     elif choice == "dryrun":
         _backend = DryRunBackend()
     else:
@@ -361,6 +485,91 @@ def _answer_value(answers, qid, kind):
 
 # 每次 extract_entities 调用的性能记录（bench_perf.py 读取；JEV_PERF=1 时打印）
 PERF = {}
+
+
+def _extract_forced(user_input, backend, cands):
+    """迭代强制选择组装（laya 验证形态）。
+
+    每轮让剩余候选在同一个 choice 的 softmax 内竞争：赢家取其
+    location/identity，移除与赢家重叠的候选后进入下一轮，直到
+    『没有人物』胜出、赢家概率低于 FORCED_MIN_P 或达到人数上限。
+    否定句由指令显式排除 + 竞争机制处理（被纠正的称呼会输给
+    正确称呼或『没有人物』）。
+    """
+    remaining = list(cands)
+    persons = []
+    t_round1 = t_round2 = 0.0
+    n_q1 = n_q2 = 0
+    for _ in range(FORCED_MAX_PERSONS + 1):
+        if not remaining:
+            break
+        t0 = time.perf_counter()
+        try:
+            if len(remaining) == 1:
+                # 退化情形：单候选的二选一强制选择不可靠（laya 实测会随机
+                # 倒向『没有人物』），改用 is_person noul 打分 + 阈值
+                c = remaining[0]
+                ans = backend.ask(user_input, {"pick_is": {
+                    "type": "noul",
+                    "instructions": f"『{c['text']}』是这句话中提到的某个人物的名字或称呼",
+                }})
+                pick = {"choice": c["text"] if
+                        (ans.get("pick_is") or {}).get("noul", 0.0) >= IS_PERSON_THRESHOLD
+                        else FORCED_NO_PERSON,
+                        "probabilities": {c["text"]: (ans.get("pick_is") or {}).get("noul", 0.0)}}
+            else:
+                criteria = {c["text"]: "" for c in remaining}
+                criteria[FORCED_NO_PERSON] = ""
+                ans = backend.ask(user_input, {"pick": {
+                    "type": "choice",
+                    "instructions": FORCED_INSTRUCTIONS,
+                    "criteria": criteria,
+                }})
+                pick = ans.get("pick") or {}
+        except Exception as e:  # noqa: BLE001
+            print(f"Jev 强制选择轮失败: {e}")
+            break
+        t_round1 += time.perf_counter() - t0
+        n_q1 += 1
+        win = pick.get("choice")
+        p_win = (pick.get("probabilities") or {}).get(win, 0.0)
+        if not win or win == FORCED_NO_PERSON or p_win < FORCED_MIN_P:
+            break
+        winner = next((c for c in remaining if c["text"] == win), None)
+        if winner is None:
+            break
+        t0 = time.perf_counter()
+        try:
+            attr = backend.ask(user_input, {
+                "loc": {"type": "choice",
+                        "instructions": f"『{win}』" + LOCATION_QUESTION,
+                        "criteria": {o: "" for o in LOCATION_OPTIONS}},
+                "id": {"type": "choice",
+                       "instructions": f"『{win}』" + IDENTITY_QUESTION,
+                       "criteria": {o: "" for o in IDENTITY_OPTIONS}},
+            })
+        except Exception as e:  # noqa: BLE001
+            print(f"Jev 属性轮失败: {e}")
+            attr = {}
+        t_round2 += time.perf_counter() - t0
+        n_q2 += 2
+        loc = _answer_value(attr, "loc", "choice") or ""
+        ident = _answer_value(attr, "id", "choice") or ""
+        ident = "" if ident == NO_IDENTITY else ident
+        if not _identity_supported(user_input, win, ident):
+            ident = ""
+        persons.append({
+            "name": win,
+            "identity": ident,
+            "location": "" if loc == NO_LOCATION else loc,
+        })
+        remaining = [c for c in remaining
+                     if c["text"] != win and not overlaps(c, winner)]
+    PERF.update({"t_round1": t_round1, "t_round2": t_round2,
+                 "n_questions_r1": n_q1, "n_questions_r2": n_q2})
+    persons.sort(key=lambda p: next(
+        (c["start"] for c in cands if c["text"] == p["name"]), 0))
+    return {"persons": persons}
 
 
 def extract_entities(user_input):
@@ -384,6 +593,15 @@ def extract_entities(user_input):
     if not cands:
         PERF["t_total"] = time.perf_counter() - t_start
         return {"persons": []}
+
+    if ASSEMBLY_MODE == "forced":
+        result = _extract_forced(user_input, backend, cands)
+        PERF["t_total"] = time.perf_counter() - t_start
+        if os.getenv("JEV_PERF"):
+            print(f"[perf] 候选={PERF['n_candidates']} 选择轮={PERF['n_questions_r1']} "
+                  f"属性问={PERF['n_questions_r2']} 一轮={PERF['t_round1']:.2f}s "
+                  f"属性={PERF['t_round2']:.2f}s 总计={PERF['t_total']:.2f}s")
+        return result
 
     questions = build_questions(cands)
     PERF["n_questions_r1"] = len(questions)
@@ -439,9 +657,12 @@ def extract_entities(user_input):
     for c, _p in winners:
         loc = _answer_value(answers, f"c{c['id']}_loc", "choice") or ""
         ident = _answer_value(answers, f"c{c['id']}_id", "choice") or ""
+        ident = "" if ident == NO_IDENTITY else ident
+        if not _identity_supported(user_input, c["text"], ident):
+            ident = ""
         persons.append({
             "name": c["text"],
-            "identity": "" if ident == NO_IDENTITY else ident,
+            "identity": ident,
             "location": "" if loc == NO_LOCATION else loc,
         })
     PERF["t_total"] = time.perf_counter() - t_start

@@ -20,10 +20,11 @@ import subprocess
 import sys
 import time
 
-os.environ.setdefault("JEV_BACKEND", "openjev")
+BACKEND = os.getenv("BENCH_BACKEND", "openjev")  # openjev | laya
+os.environ.setdefault("JEV_BACKEND", BACKEND)
 
 import jev_extract  # noqa: E402
-from jev_extract import OpenJevBackend, build_questions, generate_candidates  # noqa: E402
+from jev_extract import build_questions, generate_candidates  # noqa: E402
 from compare_results import read_rows  # noqa: E402
 
 WARMUP = 3
@@ -44,9 +45,10 @@ def percentile(xs, p):
     return xs[f] + (xs[c] - xs[f]) * (k - f)
 
 
-def fresh_backend(batched):
+def fresh_backend(batched=False):
     """重建后端（模型重新加载），返回 (backend, 加载秒数)。"""
-    os.environ["JEV_OPENJEV_BATCHED"] = "1" if batched else "0"
+    if BACKEND == "openjev":
+        os.environ["JEV_OPENJEV_BATCHED"] = "1" if batched else "0"
     jev_extract._backend = None
     t0 = time.perf_counter()
     b = jev_extract.get_backend()
@@ -116,18 +118,22 @@ def run_scaling(backend, state, cands_full):
 
 def main():
     inputs = load_inputs()
-    print(f"测试集: {len(inputs)} 条话语, 预热 {WARMUP}, 正式 {ROUNDS} 轮")
+    print(f"后端: {BACKEND}  测试集: {len(inputs)} 条话语, 预热 {WARMUP}, 正式 {ROUNDS} 轮")
 
+    model_name = (jev_extract.OPEN_JEV_MODEL if BACKEND == "openjev"
+                  else f"{jev_extract.LAYA_MODEL}/{jev_extract.LAYA_SUBFOLDER}")
     results = {
         "meta": {
             "date": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "backend": BACKEND,
             "machine": platform.machine(),
             "cpu": subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                                   capture_output=True, text=True).stdout.strip(),
             "python": sys.version.split()[0],
             "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                                          capture_output=True, text=True).stdout.strip(),
-            "model": jev_extract.OPEN_JEV_MODEL,
+            "model": model_name,
+            "candidate_filter": jev_extract.CANDIDATE_FILTER,
             "warmup": WARMUP,
             "rounds": ROUNDS,
         },
@@ -135,30 +141,39 @@ def main():
         "scaling": {},
     }
 
-    # E1/E2/E3: seq 变体
-    b_seq, load_seq = fresh_backend(batched=False)
-    times, stages, wall = run_suite(inputs)
-    results["suites"].append(summarize("openjev-seq", times, stages, wall, load_seq))
-
-    # E1/E2/E3: batch 变体
-    b_bat, load_bat = fresh_backend(batched=True)
-    times, stages, wall = run_suite(inputs)
-    results["suites"].append(summarize("openjev-batch", times, stages, wall, load_bat))
+    variants = []
+    if BACKEND == "openjev":
+        b_seq, load_s = fresh_backend(batched=False)
+        times, stages, wall = run_suite(inputs)
+        results["suites"].append(summarize("openjev-seq", times, stages, wall, load_s))
+        variants.append(("seq", b_seq))
+        b_bat, load_s = fresh_backend(batched=True)
+        times, stages, wall = run_suite(inputs)
+        results["suites"].append(summarize("openjev-batch", times, stages, wall, load_s))
+        variants.append(("batch", b_bat))
+    else:
+        b, load_s = fresh_backend()
+        times, stages, wall = run_suite(inputs)
+        results["suites"].append(summarize(BACKEND, times, stages, wall, load_s))
+        variants.append((BACKEND, b))
 
     # E4: 扩展特性（取候选最多的一条话语）
     state = max(inputs, key=lambda s: len(generate_candidates(s)))
     cands_full = generate_candidates(state)
     print(f"\nE4 扩展特性: state={state!r} 候选={len(cands_full)}")
-    for name, backend in (("seq", b_seq), ("batch", b_bat)):
-        backend.batched = (name == "batch")
+    for name, backend in variants:
+        if BACKEND == "openjev":
+            backend.batched = (name == "batch")
         sc = run_scaling(backend, state, cands_full)
         results["scaling"][name] = {"state": state, "by_questions": sc}
         print(f"  {name}: " + "  ".join(
             f"{q}问={v['mean_s']}s({v['chunks']}块)" for q, v in sc.items()))
 
-    with open("test/perf_results.json", "w", encoding="utf-8") as f:
+    out_path = ("test/perf_results.json" if BACKEND == "openjev"
+                else f"test/perf_results_{BACKEND}.json")
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    print("\n原始数据已写入 test/perf_results.json")
+    print(f"\n原始数据已写入 {out_path}")
 
 
 if __name__ == "__main__":

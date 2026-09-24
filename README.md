@@ -68,52 +68,68 @@ Jev 不能生成文本，因此人名这类开放词表值由代码先给出候�
 
 ### Jev 后端配置
 
-通过 `.env` 或环境变量选择后端（默认 `auto`：有 `TYPESAFE_API_KEY` 走官方 API，否则尝试本地 open-jev）：
+通过 `.env` 或环境变量选择后端（默认 `auto`：有 `TYPESAFE_API_KEY` 走官方 API，否则依次尝试本地 laya / open-jev）：
 
 ```
-JEV_BACKEND=auto            # auto | typesafe | openjev | dryrun
+JEV_BACKEND=auto            # auto | typesafe | laya | openjev | dryrun
 TYPESAFE_API_KEY=sk-...     # TypeSafe 官方 API（早期访问需 waitlist）
 JEV_MODEL=jev-latest        # 官方 API 模型版本（调过阈值后建议固定版本号）
-OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地开源复现
+LAYA_MODEL=convaiinnovations/laya          # 本地 Laya（推荐，多语言）
+LAYA_SUBFOLDER=multilingual                # 中文必须走 multilingual
+JEV_CANDIDATE_FILTER=surname               # laya 推荐：姓氏候选过滤
+JEV_ASSEMBLY=forced                        # laya 推荐：迭代强制选择组装
+OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（仅英文）
 ```
 
 - **typesafe**：官方托管 API（`POST https://api.typesafe.ai/v1/systemone`），需要 `pip install requests`，key 从 console.typesafe.ai 获取
+- **laya**：本地 Laya（Convai Innovations，Apache-2.0，mmBERT-base 多语言，MPS/CPU 可跑），需要 `pip install laya`；中文实测最优配置为 `JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced`（见下文实测结果）
 - **openjev**：本地开源复现（DeBERTa-v3-large，Apache-2.0，CPU 可跑），需要
-  `pip install git+https://github.com/kotoba-lang/typed-decisions`；注意该模型为英文训练，中文效果需实测
+  `pip install git+https://github.com/kotoba-lang/typed-decisions`；英文训练，中文零样本不可用（已实测）
 - **dryrun**：不调用任何模型，只打印将要发送的问题结构，用于离线检查
 
-> ⚠️ 官方 API 与开源复现均未公布中文支持，中文车载话语属于分布外场景，使用前请先用测试集实测（见下）。
+> ⚠️ 官方 API 与开源模型均未公布中文专项基准，中文车载话语属于分布外场景，使用前请先用测试集实测（见下）。
 
-### 实测结果（openjev 本地后端，2026-09-22）
+### 实测结果（2026-09-22~24，Apple M4 Pro / 24GB / MPS）
 
-硬件：Apple M4 Pro / 24GB / MPS；数据：`test/测试集.xlsx` 全部 51 条；gold：`test/测试集_结果.xlsx`。
+数据：`test/测试集.xlsx` 全部 51 条；gold：`test/测试集_结果.xlsx`（旧管线 10.23 全量通过的输出）。
 
-**准确率（零样本中文，阈值 0.5）**——`JEV_BACKEND=openjev python process_test_set.py --skip-chat --out test/测试集_结果_jev_openjev.xlsx --log test/处理日志_jev_openjev.txt` + `python compare_results.py test/测试集_结果_jev_openjev.xlsx`：
+**准确率对比（零样本，无任何微调）**：
 
-| 指标 | 数值 |
-|---|---|
-| 人名级 P / R / F1 | 0.253 / 0.532 / 0.342（TP=25 FP=74 FN=22） |
-| 命中人名的位置 / 身份准确率 | 0.680 / 0.600 |
-| 行级完全一致 | 8/50 |
+| 配置 | 人名 P/R/F1 | 位置准确率 | 身份准确率 | 行级全对 |
+|---|---|---|---|---|
+| 旧管线 Qwen-2.5-Omni-7B | （gold 来源） | — | — | 50/50 |
+| open-jev（span 候选 + noul 扇出） | 0.253/0.532/0.342 | 0.680 | 0.600 | 8/50 |
+| laya 扇出（姓氏过滤，noul 门控） | 1.000/0.170/0.291 | 0.875 | 0.000 | 11/50 |
+| **laya 强制选择（姓氏过滤 + forced + 身份证据门控）** | **0.936/0.936/0.936** | **0.841** | **0.955** | **46/50** |
 
-结论：**英文训练的 open-jev 零样本中文不可用**——误报集中在品牌名（日产）、方位词（副驾/右边）和动词短语，模型对中文片段的 is_person 判别力失效（召回尚可、精确率崩盘）。
+复现命令（laya 最优配置）：
+```bash
+JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
+  python process_test_set.py --skip-chat --out test/测试集_结果_jev_laya_forced.xlsx --log test/处理日志_jev_laya_forced.txt
+python compare_results.py test/测试集_结果_jev_laya_forced.xlsx
+```
 
-**性能**——`python bench_perf.py`（Jev 侧）+ `python bench_baseline_llm.py`（旧管线基线，需本机 13984 边车在跑）；预热 3 条、正式 2 轮，原始数据 `test/perf_results.json` / `test/perf_baseline_llm.json`：
+**性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/perf_results*.json`、`test/perf_baseline_llm.json`）：
 
-| 指标（51 条测试集，同机 M4 Pro） | 旧管线：Qwen-2.5-Omni-7B 提取调用 | openjev-seq（默认） | openjev-batch |
+| 指标（同机 51 条） | 旧管线（边车→平台） | openjev-seq | **laya forced** |
 |---|---|---|---|
-| 延迟 p50 | **0.745s** | 1.353s | 1.876s |
-| 延迟 p95 | **1.424s** | 3.913s | 4.801s |
-| 延迟均值 | **0.876s** | 1.546s | 2.052s |
-| 每次调用 token | 1400 prompt + 39 completion | 本地机时（加载 4.4s，RSS 0.7GB） | 同左（RSS 0.89GB） |
-| 中文准确率 | 10.23 全量通过（即 gold） | F1=0.342 | 同左（数值一致） |
+| 延迟 p50 | 0.745s | 1.353s | **0.044s** |
+| 延迟 p95 | 1.424s | 3.913s | **0.052s** |
+| 吞吐 | ~68 条/分钟 | 38.8 条/分钟 | **1425 条/分钟** |
+| 加载 / 内存 | 远端服务 | 4.4s / 0.7GB | 3.7s / 3.0GB |
+| 每次调用成本 | 1400 prompt + 39 completion tokens | 本地机时 | 本地机时 |
 
-结论：
-- **本地 open-jev 在延迟和准确率上双输**：旧管线走边车到平台服务（p50 0.745s）比本地 DeBERTa 分块前向（p50 1.353s）快约 1.8 倍，且中文可用。Jev 的价值主张（70–500ms + 结构化保证）只在官方 API 单请求架构下成立，开源参考实现撑不起来
-- openjev 延迟随问题数**严格线性**（8问 0.34s → 116问 4.90s，约 42ms/问）：512-token 上下文把问题切成串行分块，「加问题不加时」不成立
-- 批量前向（`JEV_OPENJEV_BATCHED=1`）与串行**数值一致**（160 问题最大概率差 9.8e-07）但在 MPS 上**慢 33%**（collator 批内 padding 到最大尺寸），故默认串行
-- ⚠️ 旧代码兼容性发现：main 分支提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响，错误发生在响应接收后）。基线基准从 git 历史加载旧函数原样复现了此行为；如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
-- 官方 API（typesafe 后端）仍待 key，拿到后补测第三列
+**结论**：
+- **laya-multilingual（mmBERT-base，Apache-2.0）+ 领域候选过滤 + 强制选择组装 = 比旧管线快 17 倍、人名 F1 0.936**，零样本、纯本地、零 token 成本。Jev 范式的性能主张（毫秒级、单前向）由 laya 在本地兑现
+- 剩余 4 行错误集中在：『小陈同学』边界切分（2 行，gold 要 小陈+身份同学）、否定句（2 行，『我不是陈总我叫陈部长』类）——属微调可解范围（官方 Kaggle 2×T4 微调 notebook 现成）
+- **laya 已知怪癖与本工程对策**（模型卡 Honest Limits 全部实测复现）：
+  - noul 弱信号/选项顺序敏感（同一问题交换 A/B 位置分数 0.82↔0.44）→ 弃用独立 noul 扇出，改**迭代强制选择**（候选在同一 softmax 内竞争）
+  - 单候选退化成二选一时随机倒向『没有人物』→ 单候选走 noul 阈值门
+  - 身份高置信度幻觉（坐主驾→司机 0.97）→ **文本证据门控**：身份词必须在原文中与人名相邻出现，否则抑制（身份准确率 0.182→0.955）
+  - 选项位置偏差 → 『未提及』放选项表第一位
+- open-jev（英文 DeBERTa）零样本中文不可用（品牌名/方位词全高分误报）；其 512-token 上下文导致延迟随问题数严格线性（42ms/问），批量前向在 MPS 上反而慢 33%（批内 padding），默认串行
+- ⚠️ 旧代码兼容性发现：main 分支提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响）。如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
+- 官方 Jev API（typesafe 后端）仍待 key，拿到后可补测第四列
 
 ## 环境准备
 
