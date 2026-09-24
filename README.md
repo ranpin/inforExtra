@@ -167,6 +167,36 @@ python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边
 python compare_results.py test/测试集_扩充10x_结果_qwen3.8-flash-aliyun.xlsx test/测试集_扩充10x_gold.xlsx
 ```
 
+## 仓库结构
+
+```
+├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
+├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
+├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）
+├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
+│                           #   fanout/forced 两种组装模式，姓氏候选过滤，身份证据门控）
+├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
+├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
+├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
+├── bench_baseline_llm.py   # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
+├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
+└── test/
+    ├── 测试集.xlsx                          # 原始 51 条用例
+    ├── 测试集_结果.xlsx                     # 原始 gold（10.23 旧管线全量通过输出）
+    ├── 测试集_扩充10x.xlsx                  # 扩充集 511 条（生成）
+    ├── 测试集_扩充10x_gold.xlsx             # 扩充集 gold（构造即标注）
+    ├── 测试集_扩充10x_meta.json             # 话语 → 模板族映射
+    ├── 测试集_结果_jev_openjev.xlsx         # open-jev 原始集（F1 0.342）
+    ├── 测试集_结果_jev_laya.xlsx            # laya 扇出模式（F1 0.291，被 forced 取代）
+    ├── 测试集_结果_jev_laya_forced.xlsx     # laya 强制选择（F1 0.936）
+    ├── 测试集_扩充10x_结果_laya.xlsx        # laya 扩充集（F1 0.793）
+    ├── 测试集_扩充10x_结果_qwen3.8-flash-aliyun.xlsx  # flash 扩充集（F1 0.964）
+    ├── perf_results.json                    # open-jev 性能原始数据
+    ├── perf_results_laya.json               # laya 性能原始数据
+    ├── perf_baseline_llm.json               # 旧管线（omni-7b）延迟原始数据
+    └── 处理日志*.txt                        # 各轮跑批日志
+```
+
 ## 环境准备
 
 1. 安装依赖:
