@@ -6,6 +6,7 @@
 
 import html
 import json
+import os
 import re
 import sys
 import zipfile
@@ -70,7 +71,17 @@ def main():
         print(__doc__)
         sys.exit(1)
     result_path = sys.argv[1]
-    gold = load_persons(GOLD_FILE)
+    gold_path = sys.argv[2] if len(sys.argv) > 2 else GOLD_FILE
+
+    # 模板族元数据（expand_test_set.py 产物）：按 gold 路径自动探测
+    meta = {}
+    if gold_path.endswith("_gold.xlsx"):
+        meta_path = gold_path[: -len("_gold.xlsx")] + "_meta.json"
+        if os.path.exists(meta_path):
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
+
+    gold = load_persons(gold_path)
     result = load_persons(result_path)
 
     tp = fp = fn = 0
@@ -78,18 +89,26 @@ def main():
     row_exact = 0
     rows = 0
     errors = []
+    fam = {}  # family -> dict(rows, exact, tp, fp, fn)
+
+    def fstat(name):
+        return fam.setdefault(name, {"rows": 0, "exact": 0, "tp": 0, "fp": 0, "fn": 0})
 
     for inp, gold_names in gold.items():
         if inp not in result:
             continue
         rows += 1
+        f = fstat(meta.get(inp, "未分类"))
+        f["rows"] += 1
         pred_names = result[inp]
         gold_keys = set(gold_names)
         pred_keys = set(pred_names)
         if gold_keys == pred_keys:
             row_exact += 1
+            f["exact"] += 1
         for k in pred_keys & gold_keys:
             tp += 1
+            f["tp"] += 1
             g_id, g_loc = gold_names[k]
             p_id, p_loc = pred_names[k]
             if g_loc == p_loc:
@@ -102,8 +121,10 @@ def main():
                 id_bad += 1
         for k in pred_keys - gold_keys:
             fp += 1
+            f["fp"] += 1
         for k in gold_keys - pred_keys:
             fn += 1
+            f["fn"] += 1
         if gold_keys != pred_keys or any(
                 gold_names[k][1] != pred_names[k][1] for k in pred_keys & gold_keys):
             errors.append((inp, sorted(gold_keys), sorted(pred_keys)))
@@ -116,16 +137,27 @@ def main():
         print("没有可对比的用例（检查两份文件的用户输入列是否能对上）")
         sys.exit(1)
 
-    print(f"对比: {result_path}  vs  {GOLD_FILE}")
+    print(f"对比: {result_path}  vs  {gold_path}")
     print(f"用例数: {rows}")
     print(f"人名级: P={prec:.3f}  R={rec:.3f}  F1={f1:.3f}  (TP={tp} FP={fp} FN={fn})")
     if tp:
         print(f"命中人名的位置准确率: {loc_ok}/{tp} = {loc_ok/tp:.3f}")
         print(f"命中人名的身份准确率: {id_ok}/{tp} = {id_ok/tp:.3f}")
     print(f"行级完全一致（人名集合相同）: {row_exact}/{rows} = {row_exact/rows:.3f}")
-    print(f"\n差异明细（{len(errors)} 条）:")
-    for inp, g, p in errors:
-        print(f"  {inp}")
+
+    if meta:
+        print("\n按模板族分解:")
+        print(f"  {'族':<14} {'行数':>5} {'行级全对':>8} {'TP':>4} {'FP':>4} {'FN':>4}")
+        for name in sorted(fam, key=lambda n: -fam[n]["rows"]):
+            s = fam[name]
+            print(f"  {name:<14} {s['rows']:>5} {s['exact']:>5} ({s['exact']/s['rows']:.2f})"
+                  f" {s['tp']:>4} {s['fp']:>4} {s['fn']:>4}")
+
+    show = errors[:40]
+    print(f"\n差异明细（共 {len(errors)} 条，显示前 {len(show)} 条）:")
+    for inp, g, p in show:
+        tag = f" [{meta[inp]}]" if inp in meta else ""
+        print(f"  {inp}{tag}")
         print(f"    gold: {g if g else '[]'}")
         print(f"    pred: {p if p else '[]'}")
 

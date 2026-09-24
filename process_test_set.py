@@ -283,6 +283,8 @@ if __name__ == "__main__":
     log_file = "test/处理日志.txt"
 
     skip_chat = "--skip-chat" in sys.argv
+    if "--in" in sys.argv:
+        input_file = sys.argv[sys.argv.index("--in") + 1]
     if "--out" in sys.argv:
         output_file = sys.argv[sys.argv.index("--out") + 1]
     if "--log" in sys.argv:
