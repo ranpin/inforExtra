@@ -105,11 +105,11 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（�
 复现命令（laya 最优配置）：
 ```bash
 JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
-  python process_test_set.py --skip-chat --out test/测试集_结果_jev_laya_forced.xlsx --log test/处理日志_jev_laya_forced.txt
-python compare_results.py test/测试集_结果_jev_laya_forced.xlsx
+  python process_test_set.py --skip-chat --out test/results/原始51_laya强制选择.xlsx --log test/results/原始51_laya强制选择_日志.txt
+python compare_results.py test/results/原始51_laya强制选择.xlsx
 ```
 
-**性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/perf_results*.json`、`test/perf_baseline_llm.json`）：
+**性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/results/原始51_*_性能.json`）：
 
 | 指标（同机 51 条） | 旧管线（边车→平台） | openjev-seq | **laya forced** |
 |---|---|---|---|
@@ -164,7 +164,7 @@ python compare_results.py test/测试集_结果_jev_laya_forced.xlsx
 ```bash
 python expand_test_set.py                                   # 生成 510 条 + gold + meta
 python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边车
-python compare_results.py test/测试集_扩充10x_结果_qwen3.8-flash-aliyun.xlsx test/测试集_扩充10x_gold.xlsx
+python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
 ```
 
 ## 仓库结构
@@ -186,15 +186,16 @@ python compare_results.py test/测试集_扩充10x_结果_qwen3.8-flash-aliyun.x
     ├── 测试集_扩充10x.xlsx                  # 扩充集 511 条（生成）
     ├── 测试集_扩充10x_gold.xlsx             # 扩充集 gold（构造即标注）
     ├── 测试集_扩充10x_meta.json             # 话语 → 模板族映射
-    ├── 测试集_结果_jev_openjev.xlsx         # open-jev 原始集（F1 0.342）
-    ├── 测试集_结果_jev_laya.xlsx            # laya 扇出模式（F1 0.291，被 forced 取代）
-    ├── 测试集_结果_jev_laya_forced.xlsx     # laya 强制选择（F1 0.936）
-    ├── 测试集_扩充10x_结果_laya.xlsx        # laya 扩充集（F1 0.793）
-    ├── 测试集_扩充10x_结果_qwen3.8-flash-aliyun.xlsx  # flash 扩充集（F1 0.964）
-    ├── perf_results.json                    # open-jev 性能原始数据
-    ├── perf_results_laya.json               # laya 性能原始数据
-    ├── perf_baseline_llm.json               # 旧管线（omni-7b）延迟原始数据
-    └── 处理日志*.txt                        # 各轮跑批日志
+    └── results/                             # 全部实验产物，文件名 = 数据集_模型/配置
+        ├── 原始51_openjev.xlsx              # open-jev 扇出（F1 0.342）
+        ├── 原始51_laya扇出.xlsx             # laya 扇出（F1 0.291，被强制选择取代）
+        ├── 原始51_laya强制选择.xlsx         # laya 强制选择（F1 0.936）
+        ├── 扩充510_laya强制选择.xlsx        # laya 强制选择（F1 0.793）
+        ├── 扩充510_qwen3.8-flash关思考.xlsx # flash 关思考（F1 0.964）
+        ├── 原始51_openjev_性能.json         # open-jev 延迟基准（p50 1.353s）
+        ├── 原始51_laya_性能.json            # laya 延迟基准（p50 0.044s）
+        ├── 原始51_omni7b_性能.json          # 旧管线 omni-7b 延迟（p50 0.745s）
+        └── *_日志.txt                       # 各轮跑批日志
 ```
 
 ## 环境准备
@@ -254,7 +255,7 @@ python process_test_set.py
 
 可选参数：
 ```bash
-python process_test_set.py --skip-chat --out test/测试集_结果_jev.xlsx --log test/处理日志_jev.txt
+python process_test_set.py --skip-chat --out test/results/原始51_某配置.xlsx --log test/results/原始51_某配置_日志.txt
 ```
 - `--skip-chat`：跳过对话模型调用，只跑 Jev 信息提取（无需本地 LLM 服务）
 - `--out PATH`：指定结果输出路径，避免覆盖旧的对照结果

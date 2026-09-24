@@ -8,7 +8,7 @@
   结果只描述 open-jev 本地后端的绝对性能
 
 用法: .venv/bin/python bench_perf.py
-产物: stdout 表格 + test/perf_results.json（原始数据）
+产物: stdout 表格 + test/results/原始51_<backend>_性能.json（原始数据）
 """
 
 import json
@@ -169,8 +169,8 @@ def main():
         print(f"  {name}: " + "  ".join(
             f"{q}问={v['mean_s']}s({v['chunks']}块)" for q, v in sc.items()))
 
-    out_path = ("test/perf_results.json" if BACKEND == "openjev"
-                else f"test/perf_results_{BACKEND}.json")
+    out_path = f"test/results/原始51_{BACKEND}_性能.json"
+    os.makedirs("test/results", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"\n原始数据已写入 {out_path}")

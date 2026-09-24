@@ -1,7 +1,7 @@
 """把一份结果 xlsx 与 gold（test/测试集_结果.xlsx）逐条对比，输出指标与差异明细。
 
 用法:
-    python compare_results.py test/测试集_结果_jev_openjev.xlsx
+    python compare_results.py test/results/原始51_openjev.xlsx
 """
 
 import html

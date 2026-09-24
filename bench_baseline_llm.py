@@ -12,7 +12,7 @@ token 用量通过包装 client.chat.completions.create 捕获（不改旧逻辑
 - 调用间固定间隔 CALL_GAP 秒以避开平台 QPM 限流（不计入延迟）
 
 用法: .venv/bin/python bench_baseline_llm.py
-产物: stdout 表格 + test/perf_baseline_llm.json
+产物: stdout 表格 + test/results/原始51_omni7b_性能.json
 """
 
 import importlib.util
@@ -128,9 +128,10 @@ def main():
         if k != "meta":
             print(f"  {k}: {v}")
 
-    with open("test/perf_baseline_llm.json", "w", encoding="utf-8") as f:
+    os.makedirs("test/results", exist_ok=True)
+    with open("test/results/原始51_omni7b_性能.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print("\n原始数据已写入 test/perf_baseline_llm.json")
+    print("\n原始数据已写入 test/results/原始51_omni7b_性能.json")
 
 
 if __name__ == "__main__":
