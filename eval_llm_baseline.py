@@ -23,6 +23,7 @@ import pandas as pd
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") \
     else "qwen3.8-max-aliyun"
+NO_THINKING = "--no-thinking" in sys.argv  # Qwen3 系推理模型关思考（平台透传 enable_thinking）
 
 
 def arg(flag, default):
@@ -32,7 +33,8 @@ def arg(flag, default):
 
 
 IN_FILE = arg("--in", "test/测试集_扩充10x.xlsx")
-OUT_FILE = arg("--out", f"test/测试集_扩充10x_结果_{MODEL}.xlsx")
+OUT_FILE = arg("--out", f"test/results/扩充510_{MODEL}"
+                        f"{'_关思考' if NO_THINKING else ''}.xlsx")
 CALL_GAP = float(os.getenv("EVAL_CALL_GAP", "1.0"))  # 平台 QPM 限流保护
 
 os.environ["OPENAI_EXTRACTION_MODEL"] = MODEL  # model_config 在 import 时读取
@@ -50,7 +52,6 @@ _spec.loader.exec_module(mod)
 
 usages = []
 _orig_create = mod.client.chat.completions.create
-NO_THINKING = "--no-thinking" in sys.argv  # Qwen3 系推理模型关思考（平台透传 enable_thinking）
 
 
 def safe_create(*args, **kwargs):
@@ -103,6 +104,7 @@ def main():
             print(f"  {i + 1}/{len(inputs)} 完成, 近 50 条均值 {sum(recent)/len(recent):.2f}s")
         time.sleep(CALL_GAP)
 
+    os.makedirs(os.path.dirname(OUT_FILE) or ".", exist_ok=True)
     pd.DataFrame(results).to_excel(OUT_FILE, index=False)
     ts = sorted(times)
     n = len(ts)
