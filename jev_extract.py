@@ -38,6 +38,9 @@ NEGATED_THRESHOLD = float(os.getenv("JEV_NEGATED_THRESHOLD", "0.5"))
 # 强制选择让候选在同一 softmax 内竞争，且天然处理否定句）
 ASSEMBLY_MODE = os.getenv("JEV_ASSEMBLY", "fanout")
 FORCED_MIN_P = float(os.getenv("JEV_FORCED_MIN_P", "0.3"))
+# 强制选择判『没有人物』的置信度 ≥ 此值时信任（真负例实测 0.77-0.86），
+# 低于此值视为含糊、回退普通 noul 扫描（多人句漏判实测 0.62）
+NO_PERSON_CONFIDENT = float(os.getenv("JEV_NO_PERSON_CONFIDENT", "0.7"))
 FORCED_MAX_PERSONS = int(os.getenv("JEV_FORCED_MAX_PERSONS", "5"))
 FORCED_NO_PERSON = "没有人物"
 FORCED_INSTRUCTIONS = (
@@ -63,6 +66,9 @@ COMPOUND_SURNAMES = frozenset((
     "慕容", "司徒", "端木", "东方", "独孤", "南宫", "呼延", "西门", "第五", "淳于",
     "单于", "太叔", "申屠", "仲孙", "轩辕", "百里", "东郭", "南门", "羊舌", "微生",
 ))
+# 多字称谓的首字（老师/部长/经理/医生/师傅）：姓+这些字的 2 字片段
+# 若存在同起点更长候选，几乎必是称谓碎片（陈部 ⊂ 陈部长）
+TITLE_HEAD_CHARS = frozenset("老部经医师")
 
 # 候选片段中出现这些字符即丢弃（功能词/动词/问候语，几乎不可能出现在姓名或称谓里）
 STOPWORD_CHARS = set(
@@ -144,7 +150,21 @@ def generate_candidates(text):
                 continue
             add(i, i + width, s)
 
-    return cands[:MAX_CANDIDATES]
+    # 碎片清理：2 字候选若形如「姓+多字称谓首字」（陈部 ⊂ 陈部长），
+    # 且同起点存在更长候选，则剔除。碎片留在候选里会稀释强制选择的
+    # softmax（实测 [陈部, 陈部长] 时 laya 倒向『没有人物』）。
+    # 只认真正的称谓碎片前缀——若按「非完整称谓」宽泛剔除，会把
+    # 江湖/宋城 这类困难负例也削成单候选、落进 noul 路径产生误报
+    # （实测 江湖救 noul=0.73，而强制选择能正确以 0.86 拒绝）。
+    cleaned = []
+    for c in cands:
+        if (len(c["text"]) == 2 and c["text"][0] != "小"
+                and c["text"][1] in TITLE_HEAD_CHARS
+                and any(o["start"] == c["start"] and len(o["text"]) > 2
+                        for o in cands)):
+            continue
+        cleaned.append(c)
+    return cleaned[:MAX_CANDIDATES]
 
 
 # ---------------------------------------------------------------- 问题构造
@@ -193,6 +213,32 @@ def _identity_supported(text, name, identity):
         return False
     window = text[max(0, idx - 4):idx + len(name) + 4]
     return identity in window
+
+
+# 否定线索：出现在人名前 3 字窗口内即视为该次出现被否定。
+# laya 零样本的否定判断是纯噪声（实测被否定 0.71 vs 未否定 0.79，
+# 任何阈值切不开），而『不是X/别叫我X』是确定性表层句法，代码层解决。
+NEGATION_CUES = ("不是", "不叫", "别叫", "别说", "别喊", "不姓")
+
+
+def _is_negated(text, name):
+    """name 在 text 中的所有出现是否都被否定线索引导。
+
+    只要有一次未被否定的出现就保留（『我不是陈总，陈总在副驾』里
+    第二个陈总是真实人物指称）。
+    """
+    total = negated = 0
+    start = 0
+    while True:
+        idx = text.find(name, start)
+        if idx < 0:
+            break
+        total += 1
+        window = text[max(0, idx - 3):idx]
+        if any(cue in window for cue in NEGATION_CUES):
+            negated += 1
+        start = idx + 1
+    return total > 0 and negated == total
 
 
 def group_overlapping(passing):
@@ -488,64 +534,119 @@ PERF = {}
 
 
 def _extract_forced(user_input, backend, cands):
-    """迭代强制选择组装（laya 验证形态）。
+    """锚点强制选择 + 增量 noul 扫描（laya 验证形态）。
 
-    每轮让剩余候选在同一个 choice 的 softmax 内竞争：赢家取其
-    location/identity，移除与赢家重叠的候选后进入下一轮，直到
-    『没有人物』胜出、赢家概率低于 FORCED_MIN_P 或达到人数上限。
-    否定句由指令显式排除 + 竞争机制处理（被纠正的称呼会输给
-    正确称呼或『没有人物』）。
+    第 1 轮：全部候选在同一个 choice 的 softmax 内竞争出锚点人物
+    （单候选退化为 noul 阈值门）。第 2 轮：对剩余候选一次性做带
+    锚点上下文的 noul 扫描，过阈值者全部保留、重叠者取概率最高。
+
+    为什么第 2 轮不用强制选择：实测 laya 的 choice 对『小X』类名字
+    系统性失效（三人句第 2 轮 小李 0.06/小宝 0.05，『没有人物』0.88），
+    而同样的上下文 noul 给 小李 0.89/小宝 0.87。noul 扫描只在锚点
+    确认后触发，纯负例句不会进入扫描，误报风险受控。
+    否定句由代码层否定门控处理（见 _is_negated）。
     """
-    remaining = list(cands)
-    persons = []
     t_round1 = t_round2 = 0.0
     n_q1 = n_q2 = 0
-    for _ in range(FORCED_MAX_PERSONS + 1):
-        if not remaining:
-            break
-        t0 = time.perf_counter()
-        try:
-            if len(remaining) == 1:
-                # 退化情形：单候选的二选一强制选择不可靠（laya 实测会随机
-                # 倒向『没有人物』），改用 is_person noul 打分 + 阈值
-                c = remaining[0]
-                ans = backend.ask(user_input, {"pick_is": {
+
+    # --- 第 1 轮：锚点 ---
+    anchor = None
+    fallback_winners = None
+    t0 = time.perf_counter()
+    try:
+        if len(cands) == 1:
+            c = cands[0]
+            ans = backend.ask(user_input, {"pick_is": {
+                "type": "noul",
+                "instructions": f"『{c['text']}』是这句话中提到的某个人物的名字或称呼",
+            }})
+            p = (ans.get("pick_is") or {}).get("noul", 0.0)
+            if p >= IS_PERSON_THRESHOLD:
+                anchor = (c, p)
+        else:
+            criteria = {c["text"]: "" for c in cands}
+            criteria[FORCED_NO_PERSON] = ""
+            ans = backend.ask(user_input, {"pick": {
+                "type": "choice",
+                "instructions": FORCED_INSTRUCTIONS,
+                "criteria": criteria,
+            }})
+            pick = ans.get("pick") or {}
+            win = pick.get("choice")
+            probs = pick.get("probabilities") or {}
+            p_win = probs.get(win, 0.0)
+            winner = next((c for c in cands if c["text"] == win), None)
+            if winner is not None and win != FORCED_NO_PERSON and p_win >= FORCED_MIN_P:
+                anchor = (winner, p_win)
+            elif probs.get(FORCED_NO_PERSON, 0.0) < NO_PERSON_CONFIDENT:
+                # 强制选择失败且『没有人物』置信度低（含糊）→ 普通 noul 扫描兜底。
+                # 实测多人句 forced 常以低置信度漏判（没有人物 0.62 vs
+                # noul 韦丽 0.85/田雪梅 0.96），而 forced 判对的负例
+                # 置信度都高（0.77-0.86），据此门控回退。
+                qs = {f"n{c['id']}": {
                     "type": "noul",
                     "instructions": f"『{c['text']}』是这句话中提到的某个人物的名字或称呼",
-                }})
-                pick = {"choice": c["text"] if
-                        (ans.get("pick_is") or {}).get("noul", 0.0) >= IS_PERSON_THRESHOLD
-                        else FORCED_NO_PERSON,
-                        "probabilities": {c["text"]: (ans.get("pick_is") or {}).get("noul", 0.0)}}
-            else:
-                criteria = {c["text"]: "" for c in remaining}
-                criteria[FORCED_NO_PERSON] = ""
-                ans = backend.ask(user_input, {"pick": {
-                    "type": "choice",
-                    "instructions": FORCED_INSTRUCTIONS,
-                    "criteria": criteria,
-                }})
-                pick = ans.get("pick") or {}
-        except Exception as e:  # noqa: BLE001
-            print(f"Jev 强制选择轮失败: {e}")
-            break
-        t_round1 += time.perf_counter() - t0
-        n_q1 += 1
-        win = pick.get("choice")
-        p_win = (pick.get("probabilities") or {}).get(win, 0.0)
-        if not win or win == FORCED_NO_PERSON or p_win < FORCED_MIN_P:
-            break
-        winner = next((c for c in remaining if c["text"] == win), None)
-        if winner is None:
-            break
+                } for c in cands}
+                ans_n = backend.ask(user_input, qs)
+                passed = [(c, (ans_n.get(f"n{c['id']}") or {}).get("noul", 0.0))
+                          for c in cands]
+                passed = [(c, p) for c, p in passed if p >= IS_PERSON_THRESHOLD]
+                passed.sort(key=lambda item: -item[1])
+                fallback_winners = []
+                for item in passed:
+                    if not any(overlaps(item[0], k[0]) for k in fallback_winners):
+                        fallback_winners.append(item)
+    except Exception as e:  # noqa: BLE001
+        print(f"Jev 锚点轮失败: {e}")
+    t_round1 = time.perf_counter() - t0
+    n_q1 = 1
+    if anchor is None and not fallback_winners:
+        PERF.update({"t_round1": t_round1, "t_round2": 0.0,
+                     "n_questions_r1": n_q1, "n_questions_r2": 0})
+        return {"persons": []}
+
+    if fallback_winners:
+        winners = fallback_winners[:FORCED_MAX_PERSONS]
+    else:
+        winners = [anchor]
+
+        # --- 第 2 轮：增量 noul 扫描剩余候选 ---
+        a_cand = anchor[0]
+        rest = [c for c in cands
+                if c["text"] != a_cand["text"] and not overlaps(c, a_cand)]
+        if rest:
+            t0 = time.perf_counter()
+            try:
+                qs = {f"s{c['id']}": {
+                    "type": "noul",
+                    "instructions": f"除了已提到的『{a_cand['text']}』，"
+                                    f"『{c['text']}』也是这句话中提到的某个人物的名字或称呼",
+                } for c in rest}
+                ans2 = backend.ask(user_input, qs)
+                passed = [(c, (ans2.get(f"s{c['id']}") or {}).get("noul", 0.0))
+                          for c in rest]
+                passed = [(c, p) for c, p in passed if p >= IS_PERSON_THRESHOLD]
+                passed.sort(key=lambda item: -item[1])
+                for item in passed:
+                    if not any(overlaps(item[0], k[0]) for k in winners):
+                        winners.append(item)
+            except Exception as e:  # noqa: BLE001
+                print(f"Jev 增量扫描失败: {e}")
+            t_round2 = time.perf_counter() - t0
+            n_q2 = len(rest)
+        winners = winners[:FORCED_MAX_PERSONS]
+
+    # --- 属性轮：每个赢家取 location/identity ---
+    persons = []
+    for c, _p in winners:
         t0 = time.perf_counter()
         try:
             attr = backend.ask(user_input, {
                 "loc": {"type": "choice",
-                        "instructions": f"『{win}』" + LOCATION_QUESTION,
+                        "instructions": f"『{c['text']}』" + LOCATION_QUESTION,
                         "criteria": {o: "" for o in LOCATION_OPTIONS}},
                 "id": {"type": "choice",
-                       "instructions": f"『{win}』" + IDENTITY_QUESTION,
+                       "instructions": f"『{c['text']}』" + IDENTITY_QUESTION,
                        "criteria": {o: "" for o in IDENTITY_OPTIONS}},
             })
         except Exception as e:  # noqa: BLE001
@@ -556,15 +657,13 @@ def _extract_forced(user_input, backend, cands):
         loc = _answer_value(attr, "loc", "choice") or ""
         ident = _answer_value(attr, "id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
-        if not _identity_supported(user_input, win, ident):
+        if not _identity_supported(user_input, c["text"], ident):
             ident = ""
         persons.append({
-            "name": win,
+            "name": c["text"],
             "identity": ident,
             "location": "" if loc == NO_LOCATION else loc,
         })
-        remaining = [c for c in remaining
-                     if c["text"] != win and not overlaps(c, winner)]
     PERF.update({"t_round1": t_round1, "t_round2": t_round2,
                  "n_questions_r1": n_q1, "n_questions_r2": n_q2})
     persons.sort(key=lambda p: next(
@@ -588,6 +687,8 @@ def extract_entities(user_input):
 
     t0 = time.perf_counter()
     cands = generate_candidates(user_input)
+    # 否定门控：被『不是/别叫我』引导的候选在代码层剔除，不进模型
+    cands = [c for c in cands if not _is_negated(user_input, c["text"])]
     PERF["t_candidates"] = time.perf_counter() - t0
     PERF["n_candidates"] = len(cands)
     if not cands:
