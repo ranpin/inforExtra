@@ -1,0 +1,96 @@
+{
+  "meta": {
+    "date": "2026-09-22 20:35:55",
+    "machine": "arm64",
+    "cpu": "Apple M4 Pro",
+    "python": "3.13.13",
+    "git_commit": "398254b",
+    "model": "com-kotobalabs/open-jev-deberta-v3-large",
+    "warmup": 3,
+    "rounds": 2
+  },
+  "suites": [
+    {
+      "variant": "openjev-seq",
+      "load_seconds": 4.36,
+      "n_utterances": 102,
+      "wall_seconds": 157.7,
+      "throughput_per_min": 38.8,
+      "latency_p50_s": 1.353,
+      "latency_p95_s": 3.913,
+      "latency_mean_s": 1.546,
+      "stage_mean_s": {
+        "t_candidates": 0.0,
+        "t_round1": 1.494,
+        "t_round2": 0.052
+      },
+      "mean_candidates": 9.3,
+      "mean_questions_r1": 37.0,
+      "mean_chunks_r1": 5.7,
+      "peak_rss_gb": 0.7
+    },
+    {
+      "variant": "openjev-batch",
+      "load_seconds": 1.98,
+      "n_utterances": 102,
+      "wall_seconds": 209.4,
+      "throughput_per_min": 29.2,
+      "latency_p50_s": 1.876,
+      "latency_p95_s": 4.801,
+      "latency_mean_s": 2.052,
+      "stage_mean_s": {
+        "t_candidates": 0.0,
+        "t_round1": 1.985,
+        "t_round2": 0.067
+      },
+      "mean_candidates": 9.3,
+      "mean_questions_r1": 37.0,
+      "mean_chunks_r1": 5.7,
+      "peak_rss_gb": 0.89
+    }
+  ],
+  "scaling": {
+    "seq": {
+      "state": "我来介绍一下后排左边是日产的陈总给他打个招呼吧",
+      "by_questions": {
+        "8": {
+          "mean_s": 0.336,
+          "chunks": 2
+        },
+        "24": {
+          "mean_s": 0.976,
+          "chunks": 4
+        },
+        "48": {
+          "mean_s": 1.988,
+          "chunks": 7
+        },
+        "116": {
+          "mean_s": 4.904,
+          "chunks": 17
+        }
+      }
+    },
+    "batch": {
+      "state": "我来介绍一下后排左边是日产的陈总给他打个招呼吧",
+      "by_questions": {
+        "8": {
+          "mean_s": 0.529,
+          "chunks": 2
+        },
+        "24": {
+          "mean_s": 1.188,
+          "chunks": 4
+        },
+        "48": {
+          "mean_s": 2.162,
+          "chunks": 7
+        },
+        "116": {
+          "mean_s": 5.511,
+          "chunks": 17
+        }
+      }
+    }
+  }
+}
