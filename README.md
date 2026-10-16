@@ -4,6 +4,19 @@
 
 对话回答通过 OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B；信息提取使用 **Jev 类型化决策模型**（见下文「信息提取架构」）。
 
+## 演示 Demo
+
+**在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/inforExtra/>
+
+**本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
+
+```bash
+python demo/server.py   # 启动时预加载模型约 3-5s，然后打开 http://127.0.0.1:8000
+```
+
+- `demo/`：实时推理版——`server.py`（后端，仅用标准库 `http.server`，无额外 Web 框架依赖）+ `index.html`（座舱俯视图，随输入实时点亮座位）
+- `docs/index.html`：线上展示页（预录回放版，由 GitHub Pages 承载；模型 322M 无法在静态页运行，故用真实推理结果固化）
+
 ## 功能特点
 
 1. 通过OpenAI兼容API调用Qwen-2.5-Omni-7B模型实现对话问答
@@ -177,6 +190,8 @@ python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx tes
 ## 仓库结构
 
 ```
+├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
+├── docs/index.html         # 线上展示页（预录回放版，GitHub Pages 承载）
 ├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
 ├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
 ├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）

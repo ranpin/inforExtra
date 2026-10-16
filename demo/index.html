@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>座舱人员信息提取 · laya 本地推理 Demo</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121821; --panel2:#0f141c; --line:#1e2833;
+    --txt:#e6ebf2; --muted:#8b96a5; --dim:#5b6675;
+    --acc:#2dd4bf; --acc-soft:rgba(45,212,191,.14); --acc-glow:rgba(45,212,191,.45);
+    --amber:#fbbf24; --amber-soft:rgba(251,191,36,.12);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 700px at 70% -10%, #12202a 0%, var(--bg) 55%);
+    color:var(--txt);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    min-height:100vh;
+  }
+  .wrap{max-width:1060px;margin:0 auto;padding:28px 20px 90px}
+
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:6px}
+  header h1{font-size:22px;font-weight:700;margin:0;letter-spacing:.3px}
+  header .sub{color:var(--muted);font-size:13px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 22px}
+  .badge{font-size:12px;color:var(--acc);background:var(--acc-soft);
+    border:1px solid rgba(45,212,191,.25);padding:3px 10px;border-radius:999px}
+  .badge.amber{color:var(--amber);background:var(--amber-soft);border-color:rgba(251,191,36,.25)}
+
+  main{display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start}
+  @media (max-width:820px){main{grid-template-columns:1fr}}
+
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));
+    border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .card h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 12px;
+    text-transform:uppercase;letter-spacing:.8px}
+
+  /* ---- 座舱图 ---- */
+  .cabin-card{display:flex;flex-direction:column;align-items:center}
+  svg{width:100%;max-width:300px;height:auto}
+  .car-body{fill:#0d1420;stroke:#2a3644;stroke-width:2.5}
+  .windshield{fill:none;stroke:#22303e;stroke-width:2}
+  .steering{fill:none;stroke:#33414f;stroke-width:3}
+  .seat rect{fill:#141c27;stroke:#2a3644;stroke-width:1.5;transition:all .25s ease}
+  .seat .seat-label{fill:var(--dim);font-size:11px;text-anchor:middle;transition:fill .25s}
+  .seat .seat-person{fill:var(--acc);font-size:13px;font-weight:700;text-anchor:middle;opacity:0;transition:opacity .25s}
+  .seat.occupied rect{fill:var(--acc-soft);stroke:var(--acc);
+    filter:drop-shadow(0 0 6px var(--acc-glow))}
+  .seat.occupied .seat-label{fill:var(--acc)}
+  .seat.occupied .seat-person{opacity:1}
+  .seat.zone rect{fill:var(--amber-soft);stroke:var(--amber)}
+  .seat.zone .seat-label{fill:var(--amber)}
+  .cabin-hint{color:var(--dim);font-size:12px;margin-top:10px;text-align:center}
+
+  /* ---- 输入与结果 ---- */
+  textarea{width:100%;min-height:96px;resize:vertical;background:#0c1219;color:var(--txt);
+    border:1px solid var(--line);border-radius:10px;padding:12px 14px;font:inherit;outline:none}
+  textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
+  .examples{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+  .chip{font-size:12.5px;color:var(--muted);background:#0c1219;border:1px solid var(--line);
+    padding:5px 11px;border-radius:999px;cursor:pointer;transition:all .15s}
+  .chip:hover{color:var(--acc);border-color:var(--acc);background:var(--acc-soft)}
+
+  .persons{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+  .person{display:flex;align-items:center;gap:12px;background:#0c1219;border:1px solid var(--line);
+    border-radius:10px;padding:11px 14px;animation:pop .25s ease}
+  @keyframes pop{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .person .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);flex:none;
+    box-shadow:0 0 8px var(--acc-glow)}
+  .person .name{font-weight:700;font-size:16px}
+  .person .tag{font-size:12px;color:var(--muted);background:#131b25;border:1px solid var(--line);
+    padding:2px 8px;border-radius:6px}
+  .person .tag.loc{color:var(--acc);border-color:rgba(45,212,191,.3)}
+  .person .tag.id{color:var(--amber);border-color:rgba(251,191,36,.3)}
+  .empty{color:var(--dim);font-size:13.5px;padding:8px 2px}
+
+  /* ---- 底部性能条 ---- */
+  #perfbar{position:fixed;left:0;right:0;bottom:0;background:rgba(11,15,20,.92);
+    backdrop-filter:blur(8px);border-top:1px solid var(--line);
+    display:flex;gap:22px;flex-wrap:wrap;align-items:center;padding:10px 22px;font-size:12.5px;color:var(--muted)}
+  #perfbar b{color:var(--acc);font-weight:600;font-variant-numeric:tabular-nums}
+  #perfbar .model{margin-left:auto;color:var(--dim)}
+  .spin{display:inline-block;width:11px;height:11px;border:2px solid var(--line);
+    border-top-color:var(--acc);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-1px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>座舱人员信息提取</h1>
+    <span class="sub">类型化决策模型 · 从对话中抽取「人物 / 身份 / 座位」</span>
+  </header>
+  <div class="badges">
+    <span class="badge" id="b-model">laya-multilingual</span>
+    <span class="badge">纯本地推理</span>
+    <span class="badge">0 token 成本</span>
+    <span class="badge amber" id="b-latency">单条 ~50ms</span>
+  </div>
+
+  <main>
+    <section class="card cabin-card">
+      <h2>座舱视图</h2>
+      <svg viewBox="0 0 320 460" aria-label="座舱俯视图">
+        <rect class="car-body" x="54" y="14" width="212" height="432" rx="50"/>
+        <path class="windshield" d="M 84 74 Q 160 44 236 74"/>
+        <circle class="steering" cx="104" cy="104" r="19"/>
+        <!-- 前排 -->
+        <g class="seat" id="seat-driver">
+          <rect x="78" y="128" width="62" height="72" rx="15"/>
+          <text class="seat-label" x="109" y="158">主驾</text>
+          <text class="seat-person" x="109" y="180"></text>
+        </g>
+        <g class="seat" id="seat-passenger">
+          <rect x="180" y="128" width="62" height="72" rx="15"/>
+          <text class="seat-label" x="211" y="158">副驾</text>
+          <text class="seat-person" x="211" y="180"></text>
+        </g>
+        <!-- 后排 -->
+        <g class="seat" id="seat-rear-left">
+          <rect x="66" y="286" width="56" height="72" rx="14"/>
+          <text class="seat-label" x="94" y="316">后排左</text>
+          <text class="seat-person" x="94" y="338"></text>
+        </g>
+        <g class="seat" id="seat-rear-mid">
+          <rect x="132" y="286" width="56" height="72" rx="14"/>
+          <text class="seat-label" x="160" y="316">后排中</text>
+          <text class="seat-person" x="160" y="338"></text>
+        </g>
+        <g class="seat" id="seat-rear-right">
+          <rect x="198" y="286" width="56" height="72" rx="14"/>
+          <text class="seat-label" x="226" y="316">后排右</text>
+          <text class="seat-person" x="226" y="338"></text>
+        </g>
+      </svg>
+      <div class="cabin-hint" id="cabin-hint">输入对话后，检测到的人物会点亮对应座位</div>
+    </section>
+
+    <section class="card">
+      <h2>输入对话</h2>
+      <textarea id="input" placeholder="例如：副驾坐的是日产的小王，后排左边是吉利的陈总"></textarea>
+      <div class="examples" id="examples"></div>
+
+      <h2 style="margin-top:20px">提取结果</h2>
+      <div class="persons" id="persons"><div class="empty">等待输入…</div></div>
+    </section>
+  </main>
+</div>
+
+<div id="perfbar">
+  <span id="status">就绪</span>
+  <span>延迟 <b id="m-lat">–</b></span>
+  <span>候选 <b id="m-cand">–</b></span>
+  <span>选择轮 <b id="m-r1">–</b></span>
+  <span>属性问 <b id="m-r2">–</b></span>
+  <span class="model" id="m-model"></span>
+</div>
+
+<script>
+"use strict";
+// location 值 → 具体座位（jev_extract.LOCATION_OPTIONS 的归一化）
+const SEAT_MAP = {
+  "主驾":"seat-driver", "主驾驶":"seat-driver", "驾驶位":"seat-driver",
+  "副驾":"seat-passenger", "副驾驶":"seat-passenger",
+  "后排左边":"seat-rear-left", "左后":"seat-rear-left", "左后座":"seat-rear-left",
+  "后排右边":"seat-rear-right", "右后":"seat-rear-right", "右后座":"seat-rear-right",
+};
+// location 值 → 区域（点亮整排/整侧，不定位到单座）
+const ZONE_MAP = {
+  "前排":["seat-driver","seat-passenger"],
+  "后排":["seat-rear-left","seat-rear-mid","seat-rear-right"],
+  "左边":["seat-driver","seat-rear-left"],
+  "右边":["seat-passenger","seat-rear-right"],
+};
+// 例句均经实测筛选：单座/身份/多人/负例各覆盖，避开已知弱项（左右方位、同学边界）
+const EXAMPLES = [
+  "副驾坐的是日产的小王",
+  "司机王师傅在主驾",
+  "副驾是我同事小刘",
+  "主驾王师傅，副驾张医生，后排李总",
+  "车里没有人",
+];
+
+const $ = id => document.getElementById(id);
+const seats = [...document.querySelectorAll(".seat")];
+let timer = null, busy = false;
+
+function clearCabin(){
+  seats.forEach(s => { s.classList.remove("occupied","zone");
+    s.querySelector(".seat-person").textContent = ""; });
+}
+
+function renderCabin(persons){
+  clearCabin();
+  const seatNames = {};      // seatId -> [names]，同座多人要合并显示，不能互相覆盖
+  let zoned = 0, unplaced = 0;
+  for(const p of persons){
+    const seatId = SEAT_MAP[p.location];
+    const zone = ZONE_MAP[p.location];
+    if(seatId){
+      (seatNames[seatId] = seatNames[seatId] || []).push(p.name);
+    } else if(zone){
+      zone.forEach(id => $(id).classList.add("zone"));
+      zoned++;
+    } else {
+      unplaced++;
+    }
+  }
+  for(const [id, names] of Object.entries(seatNames)){
+    const el = $(id);
+    el.classList.add("occupied");
+    el.querySelector(".seat-person").textContent = names.join("/");
+  }
+  const placed = Object.keys(seatNames).length + zoned;
+  $("cabin-hint").textContent = persons.length === 0
+    ? "未检测到人物"
+    : (unplaced || zoned
+        ? `${persons.length} 人：${placed ? placed+" 人已定位" : ""}${unplaced ? "，"+unplaced+" 人未提及座位" : ""}${zoned ? "（黄色=只给出区域）" : ""}`
+        : "已点亮对应座位");
+}
+
+function renderPersons(persons){
+  const box = $("persons");
+  if(!persons.length){ box.innerHTML = '<div class="empty">未检测到人物</div>'; return; }
+  box.innerHTML = persons.map(p => {
+    const loc = p.location ? `<span class="tag loc">${p.location}</span>` : '<span class="tag">位置未提及</span>';
+    const id  = p.identity ? `<span class="tag id">${p.identity}</span>` : "";
+    return `<div class="person"><span class="dot"></span><span class="name">${esc(p.name)}</span>${loc}${id}</div>`;
+  }).join("");
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+async function extract(text){
+  if(busy) return;
+  busy = true;
+  $("status").innerHTML = '<span class="spin"></span> 提取中';
+  try{
+    const r = await fetch("/api/extract", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({text})
+    });
+    const d = await r.json();
+    if(!r.ok){ throw new Error(d.error || r.status); }
+    renderPersons(d.persons || []);
+    renderCabin(d.persons || []);
+    const pf = d.perf || {};
+    $("m-lat").textContent  = d.elapsed_ms + " ms";
+    $("m-cand").textContent = pf.n_candidates ?? "–";
+    $("m-r1").textContent   = pf.n_questions_r1 ?? "–";
+    $("m-r2").textContent   = pf.n_questions_r2 ?? "–";
+    $("b-latency").textContent = "单条 " + d.elapsed_ms + "ms";
+    $("status").textContent = "就绪";
+  }catch(e){
+    $("status").textContent = "出错：" + e.message;
+  }finally{ busy = false; }
+}
+
+function schedule(){
+  clearTimeout(timer);
+  const t = $("input").value.trim();
+  if(!t){ renderPersons([]); clearCabin(); $("cabin-hint").textContent="输入对话后，检测到的人物会点亮对应座位";
+    $("status").textContent="就绪"; return; }
+  timer = setTimeout(() => extract(t), 350);   // laya 很快，边输入边提取
+}
+
+$("input").addEventListener("input", schedule);
+const exBox = $("examples");
+EXAMPLES.forEach(s => {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = s;
+  b.onclick = () => { $("input").value = s; extract(s); };
+  exBox.appendChild(b);
+});
+
+// 启动信息
+fetch("/api/health").then(r=>r.json()).then(h=>{
+  if(h.model) $("b-model").textContent = h.model + (h.subfolder?"/"+h.subfolder:"");
+  $("m-model").textContent = (h.model||"") + " · assembly=" + (h.assembly||"") +
+    " · filter=" + (h.candidate_filter||"");
+}).catch(()=>{});
+</script>
+</body>
+</html>
