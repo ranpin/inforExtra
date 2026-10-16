@@ -128,7 +128,7 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
   - 身份高置信度幻觉（坐主驾→司机 0.97）→ **文本证据门控**：身份词必须在原文中与人名相邻出现，否则抑制（身份准确率 0.182→0.955）
   - 选项位置偏差 → 『未提及』放选项表第一位
 - open-jev（英文 DeBERTa）零样本中文不可用（品牌名/方位词全高分误报）；其 512-token 上下文导致延迟随问题数严格线性（42ms/问），批量前向在 MPS 上反而慢 33%（批内 padding），默认串行
-- ⚠️ 旧代码兼容性发现：main 分支提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响）。如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
+- ⚠️ 旧代码兼容性发现（旧提取函数已随 Jev 重构合并从 main 移除，以下为历史注记）：旧提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响）。如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
 - 官方 Jev API（typesafe 后端）仍待 key，拿到后可补测第四列
 
 ### 扩充集评测（510 条，2026-09-24）
@@ -167,10 +167,12 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
 
 复现：
 ```bash
-python expand_test_set.py                                   # 生成 510 条 + gold + meta
+python expand_test_set.py                                   # 生成 511 条 + gold + meta
 python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边车
 python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
 ```
+
+> 注：`eval_llm_baseline.py` / `bench_baseline_llm.py` 通过 `git show main:qwen_chat.py` 加载旧提取函数；该函数已随 Jev 重构合并（668ef0b）从 main 移除，直接复跑会 `AttributeError`，需先把脚本内 ref 指向重构前 commit（如 7bae5bb）。
 
 ## 仓库结构
 
@@ -194,8 +196,11 @@ python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx tes
     └── results/                             # 全部实验产物，文件名 = 数据集_模型/配置
         ├── 原始51_openjev.xlsx              # open-jev 扇出（F1 0.342）
         ├── 原始51_laya扇出.xlsx             # laya 扇出（F1 0.291，被强制选择取代）
-        ├── 原始51_laya强制选择.xlsx         # laya 强制选择（F1 0.936）
-        ├── 扩充510_laya强制选择.xlsx        # laya 强制选择（F1 0.793）
+        ├── 原始51_laya强制选择.xlsx         # laya 强制选择 v1（F1 0.936）
+        ├── 原始51_laya强制选择v3.xlsx       # laya 强制选择 v3（F1 0.957）
+        ├── 扩充510_laya强制选择.xlsx        # laya 强制选择 v1（F1 0.793）
+        ├── 扩充510_laya强制选择v2.xlsx      # laya 强制选择 v2（F1 0.846，中间迭代）
+        ├── 扩充510_laya强制选择v3.xlsx      # laya 强制选择 v3（F1 0.916）
         ├── 扩充510_qwen3.8-flash关思考.xlsx # flash 关思考（F1 0.964）
         ├── 原始51_openjev_性能.json         # open-jev 延迟基准（p50 1.353s）
         ├── 原始51_laya_性能.json            # laya 延迟基准（p50 0.044s）
