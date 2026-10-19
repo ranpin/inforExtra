@@ -185,7 +185,26 @@ python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边
 python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
 ```
 
-> 注：`eval_llm_baseline.py` / `bench_baseline_llm.py` 通过 `git show main:qwen_chat.py` 加载旧提取函数；该函数已随 Jev 重构合并（668ef0b）从 main 移除，直接复跑会 `AttributeError`，需先把脚本内 ref 指向重构前 commit（如 7bae5bb）。
+> 注：`eval_llm_baseline.py` / `bench_baseline_llm.py` 加载的旧提取函数 `extract_entities_with_model` 已随 Jev 重构（668ef0b）从 main 移除，两脚本的 ref 已钉到重构前的 `7bae5bb`（commit e89252b），可直接复跑。
+
+### 对抗子集评测（分布外，2026-10-19）
+
+510 条扩充集是**模板构造**的（人名全从 `SURNAMES` 表抽、否定句式与 `_is_negated` 的 `NEGATION_CUES` 同源），属**分布内**评测。为暴露召回天花板与否定泛化缺口，另建 60 条对抗子集（`eval_adversarial.py`，三族各 20 条，全部针对代码盲区设计）：
+
+| 族 | 设计意图 | 人名级结果 | F1 |
+|---|---|---|---|
+| 表外姓 | 姓氏不在 `SURNAME_CHARS`（翦/仝/冼/佟…）、外号非「小X」（阿宝/大壮） | **20/20 全漏召**（FN=20） | **0.000** |
+| 真实否定 | 否定线索不在 `NEGATION_CUES` 或置于名字后（别把我当成X / X不是我 / 并非X / 没来） | **15/20 误报**（FP=15） | **0.000** |
+| ASR噪声（对照） | 口语填充/重复/语气尾词，人名仍在表内 | 18 TP / 3 FP / 2 FN | 0.878 |
+| **合计** | — | — | **0.474** |
+
+**结论（诚实边界）**：分布内 0.916 **不是真实座舱语音的分数**，而是模板分布内的分数。两个盲区是**确定性代码边界**、非模型能力问题：
+
+- **表外姓 = 硬召回天花板**：`surname` 过滤只为「姓开头 / 小X / 复姓 / 拉丁词」生成候选，表外姓根本进不了候选集 → 必然漏召。扩姓氏表或改 `span` 模式可解，但会重新引入品牌/方位词误报（这正是当初选 surname 过滤的代价）。
+- **真实否定 = 门控泛化缺口**：`_is_negated` 只匹配名字前 3 字内的 6 个固定线索；「别把我当成 / X不是我 / 并非 / 没来」全绕过。但 20 条里仍有 5 条被 laya 模型自身正确拒绝（「缺席 / 不来了」类），说明模型有部分否定判断力，是代码门控没覆盖全。
+- **ASR 噪声鲁棒（0.878）**：口语填充/重复不破坏表内人名提取 → 瓶颈在**词表覆盖**，不在模型对真实语音的适应力。
+
+复现：`.venv/bin/python eval_adversarial.py`（产物 `test/对抗集.xlsx` + `test/对抗集_gold.xlsx` + `test/results/对抗集_laya_v3.xlsx`）。
 
 ## 仓库结构
 
