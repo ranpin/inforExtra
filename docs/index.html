@@ -113,7 +113,7 @@
 <header class="hero">
   <h1>座舱人员信息提取 · inforExtra</h1>
   <p class="lead">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型
-    （laya-multilingual）替代 2000-token 巨型 prompt，在 510 条人工标注集上把人名 F1 从
+    （laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从
     0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
   <div class="badges">
     <span class="badge">laya-multilingual · mmBERT 322M</span>
@@ -232,8 +232,9 @@
   </div>
 
   <p class="sec-note" style="margin-top:14px">
-    <b>取舍</b>：flash 精度更高（F1 0.964）但单条 1.29s 且每次约 1400 token；
-    laya 慢不了多少精度（0.916）却快 <b class="best">26 倍</b>、零成本、可离线——座舱场景要的是即时响应与零边际成本。
+    <b>取舍</b>：flash 精度更高（F1 0.964）但为远端 LLM 调用、按 token 计费；
+    laya 精度略低（0.916）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
+    <span style="color:var(--dim)">（laya vs 旧管线 omni-7b 的 17 倍加速见上方性能表、有 51 条 JSON 支撑；与 flash 的延迟倍数因 flash 延迟未入库，此处不列。）</span>
   </p>
 </section>
 
@@ -241,13 +242,13 @@
 <section id="method">
   <h2>方法：类型化决策替代巨型 prompt</h2>
   <p class="sec-note">旧管线把 2000-token 的抽取规则塞进 prompt 让 LLM 一次输出 JSON；
-    新管线改成一串<b>封闭选项的判别式问题</b>，由 laya 单前向作答。</p>
+    新管线改成一串<b>封闭选项的判别式问题</b>，由 laya 判别式作答（单次调用内并行答全部问题；管线按锚点→扫描→属性分多轮调用）。</p>
   <div class="cols">
     <div class="card">
       <h3>管线</h3>
       <ul class="tight">
         <li><b>候选生成</b>：规则抽 CJK 称谓片段（姓氏过滤），不靠模型</li>
-        <li><b>选择轮</b>：所有候选放进同一个 softmax 竞争（forced choice），一次前向定谁是真的</li>
+        <li><b>选择轮</b>：所有候选放进同一个 softmax 竞争（forced choice），同一轮调用内定谁是真的</li>
         <li><b>属性轮</b>：对每个赢家问 location（13 选项）/ identity（15 选项）</li>
         <li><b>代码层门控</b>：否定句剔除、身份证据校验、称谓碎片清理</li>
       </ul>
