@@ -5,302 +5,281 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>inforExtra · 座舱人员信息提取</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🚗</text></svg>">
+<!-- 共享演示页外壳（配色/页头/章节/页脚统一，单一事实源在主站 public/demo-shell.css） -->
+<link rel="stylesheet" href="https://ranpin.github.io/demo-shell.css">
 <style>
-  :root{
-    --bg:#0b0f14; --panel:#121821; --panel2:#0f141c; --line:#1e2833;
-    --txt:#e6ebf2; --muted:#8b96a5; --dim:#5b6675;
-    --acc:#2dd4bf; --acc-soft:rgba(45,212,191,.14); --acc-glow:rgba(45,212,191,.45);
-    --amber:#fbbf24; --amber-soft:rgba(251,191,36,.12);
-    --radius:14px;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{
-    background:radial-gradient(1200px 700px at 70% -10%, #12202a 0%, var(--bg) 55%);
-    color:var(--txt);
-    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-  }
-  a{color:var(--acc);text-decoration:none}
-  a:hover{text-decoration:underline}
-  .wrap{max-width:1060px;margin:0 auto;padding:32px 20px 60px}
-  code{background:#0c1219;border:1px solid var(--line);border-radius:5px;padding:1px 6px;
-    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:var(--acc)}
-  pre{background:#0c1219;border:1px solid var(--line);border-radius:10px;padding:14px 16px;
-    overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.6}
-  pre code{background:none;border:none;padding:0;color:var(--txt)}
+  /* 本页专属组件（徽章/座舱图/交互区/表格），结构色一律引用外壳 --ds-* 变量 */
+  .ie-badges{display:flex;gap:8px;flex-wrap:wrap;margin:.95rem 0 0}
+  .ie-badge{font-size:12px;color:var(--ds-accent-strong);background:var(--ds-accent-soft);
+    border:1px solid var(--ds-accent-ring);padding:3px 11px;border-radius:999px}
+  .ie-badge.amber{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .ie-badge.plain{color:var(--ds-muted);background:var(--ds-code-bg);border-color:var(--ds-border)}
+  .ie-badge.plain a{color:inherit;text-decoration:none}
+  .ie-badge.plain a:hover{color:var(--ds-accent)}
+  .sec-note{color:var(--ds-muted);font-size:13.5px;margin:0 0 16px;line-height:1.6}
+  .best{color:var(--ds-accent-strong);font-weight:700}
 
-  header.hero{margin-bottom:26px}
-  .hero h1{font-size:27px;font-weight:700;margin:0 0 8px;letter-spacing:.3px}
-  .hero .lead{color:var(--muted);font-size:15px;max-width:760px;margin:0 0 14px}
-  .badges{display:flex;gap:8px;flex-wrap:wrap}
-  .badge{font-size:12px;color:var(--acc);background:var(--acc-soft);
-    border:1px solid rgba(45,212,191,.25);padding:3px 11px;border-radius:999px}
-  .badge.amber{color:var(--amber);background:var(--amber-soft);border-color:rgba(251,191,36,.25)}
-  .badge.plain{color:var(--muted);background:#0c1219;border-color:var(--line)}
-
-  section{margin-top:34px}
-  h2{font-size:18px;font-weight:700;margin:0 0 6px;display:flex;align-items:center;gap:9px}
-  h2::before{content:"";width:4px;height:17px;border-radius:2px;background:var(--acc);flex:none}
-  .sec-note{color:var(--muted);font-size:13.5px;margin:0 0 16px}
-
-  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));
-    border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+  .card{background:var(--ds-panel);border:1px solid var(--ds-border);border-radius:var(--ds-radius);padding:18px}
   .grid2{display:grid;grid-template-columns:330px 1fr;gap:20px;align-items:start}
   @media (max-width:840px){.grid2{grid-template-columns:1fr}}
-  .card h3{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 12px;
-    text-transform:uppercase;letter-spacing:.8px}
+  .card h3{font-size:12px;font-weight:600;color:var(--ds-muted);margin:0 0 12px;text-transform:uppercase;letter-spacing:.8px}
 
-  /* ---- 座舱图 ---- */
+  /* ---- 座舱图（亮色） ---- */
   .cabin-card{display:flex;flex-direction:column;align-items:center}
   svg.cabin{width:100%;max-width:290px;height:auto}
-  .car-body{fill:#0d1420;stroke:#2a3644;stroke-width:2.5}
-  .windshield{fill:none;stroke:#22303e;stroke-width:2}
-  .steering{fill:none;stroke:#33414f;stroke-width:3}
-  .seat rect{fill:#141c27;stroke:#2a3644;stroke-width:1.5;transition:all .25s ease}
-  .seat .seat-label{fill:var(--dim);font-size:11px;text-anchor:middle;transition:fill .25s}
-  .seat .seat-person{fill:var(--acc);font-size:13px;font-weight:700;text-anchor:middle;opacity:0;transition:opacity .25s}
-  .seat.occupied rect{fill:var(--acc-soft);stroke:var(--acc);filter:drop-shadow(0 0 6px var(--acc-glow))}
-  .seat.occupied .seat-label{fill:var(--acc)}
+  .car-body{fill:#f1f5f9;stroke:#cbd5e1;stroke-width:2.5}
+  .windshield{fill:none;stroke:#e2e8f0;stroke-width:2}
+  .steering{fill:none;stroke:#cbd5e1;stroke-width:3}
+  .seat rect{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.5;transition:all .25s ease}
+  .seat .seat-label{fill:#64748b;font-size:11px;text-anchor:middle;transition:fill .25s}
+  .seat .seat-person{fill:var(--ds-accent);font-size:13px;font-weight:700;text-anchor:middle;opacity:0;transition:opacity .25s}
+  .seat.occupied rect{fill:var(--ds-accent-soft);stroke:var(--ds-accent);filter:drop-shadow(0 0 5px var(--ds-accent-ring))}
+  .seat.occupied .seat-label{fill:var(--ds-accent)}
   .seat.occupied .seat-person{opacity:1}
-  .seat.zone rect{fill:var(--amber-soft);stroke:var(--amber)}
-  .seat.zone .seat-label{fill:var(--amber)}
-  .cabin-hint{color:var(--dim);font-size:12px;margin-top:10px;text-align:center;min-height:18px}
+  .seat.zone rect{fill:#fffbeb;stroke:#d97706}
+  .seat.zone .seat-label{fill:#b45309}
+  .cabin-hint{color:var(--ds-faint);font-size:12px;margin-top:10px;text-align:center;min-height:18px}
 
   /* ---- 交互区 ---- */
   .examples{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
-  .chip{font-size:12.5px;color:var(--muted);background:#0c1219;border:1px solid var(--line);
+  .chip{font-size:12.5px;color:var(--ds-muted);background:var(--ds-panel);border:1px solid var(--ds-border);
     padding:5px 11px;border-radius:999px;cursor:pointer;transition:all .15s;font-family:inherit}
-  .chip:hover{color:var(--acc);border-color:var(--acc);background:var(--acc-soft)}
-  .chip.active{color:#04211d;background:var(--acc);border-color:var(--acc);font-weight:600}
-  .quote{background:#0c1219;border:1px solid var(--line);border-left:3px solid var(--acc);
-    border-radius:8px;padding:11px 14px;color:var(--txt);font-size:14.5px;min-height:44px}
+  .chip:hover{color:var(--ds-accent);border-color:var(--ds-accent);background:var(--ds-accent-soft)}
+  .chip.active{color:#fff;background:var(--ds-accent);border-color:var(--ds-accent);font-weight:600}
+  .quote{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-left:3px solid var(--ds-accent);
+    border-radius:8px;padding:11px 14px;color:var(--ds-text);font-size:14.5px;min-height:44px}
   .persons{display:flex;flex-direction:column;gap:9px;margin-top:14px}
-  .person{display:flex;align-items:center;gap:11px;background:#0c1219;border:1px solid var(--line);
+  .person{display:flex;align-items:center;gap:11px;background:var(--ds-panel);border:1px solid var(--ds-border);
     border-radius:10px;padding:10px 13px;animation:pop .25s ease}
   @keyframes pop{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-  .person .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);flex:none;box-shadow:0 0 8px var(--acc-glow)}
+  .person .dot{width:9px;height:9px;border-radius:50%;background:var(--ds-accent);flex:none;box-shadow:0 0 6px var(--ds-accent-ring)}
   .person .name{font-weight:700;font-size:15.5px}
-  .person .tag{font-size:12px;color:var(--muted);background:#131b25;border:1px solid var(--line);padding:2px 8px;border-radius:6px}
-  .person .tag.loc{color:var(--acc);border-color:rgba(45,212,191,.3)}
-  .person .tag.id{color:var(--amber);border-color:rgba(251,191,36,.3)}
-  .empty{color:var(--dim);font-size:13.5px;padding:6px 2px}
-  .perfline{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
-    font-size:12.5px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap}
-  .perfline b{color:var(--acc);font-weight:600;font-variant-numeric:tabular-nums}
-  .replay-note{font-size:12.5px;color:var(--dim);margin-top:12px;line-height:1.5}
+  .person .tag{font-size:12px;color:var(--ds-muted);background:var(--ds-code-bg);border:1px solid var(--ds-border);padding:2px 8px;border-radius:6px}
+  .person .tag.loc{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring)}
+  .person .tag.id{color:#b45309;border-color:#fde68a}
+  .empty{color:var(--ds-faint);font-size:13.5px;padding:6px 2px}
+  .perfline{margin-top:14px;padding-top:12px;border-top:1px solid var(--ds-border);
+    font-size:12.5px;color:var(--ds-muted);display:flex;gap:18px;flex-wrap:wrap}
+  .perfline b{color:var(--ds-accent-strong);font-weight:600;font-variant-numeric:tabular-nums}
+  .replay-note{font-size:12.5px;color:var(--ds-faint);margin-top:12px;line-height:1.5}
 
   /* ---- 表格 ---- */
-  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--ds-border);border-radius:10px;background:var(--ds-panel)}
   table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
-  th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--line)}
-  th{background:#0e141d;color:var(--muted);font-weight:600;font-size:12.5px;white-space:nowrap}
+  th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--ds-border)}
+  th{background:var(--ds-code-bg);color:var(--ds-muted);font-weight:600;font-size:12.5px;white-space:nowrap}
   tr:last-child td{border-bottom:none}
   td.num,th.num{font-variant-numeric:tabular-nums;text-align:right}
-  .best{color:var(--acc);font-weight:700}
-  caption{caption-side:top;text-align:left;padding:0 0 9px;color:var(--muted);font-size:12.5px}
+  caption{caption-side:top;text-align:left;padding:9px 13px;color:var(--ds-muted);font-size:12.5px}
 
   ul.tight{margin:8px 0 0;padding-left:20px}
   ul.tight li{margin:5px 0}
   .cols{display:grid;grid-template-columns:1fr 1fr;gap:20px}
   @media (max-width:760px){.cols{grid-template-columns:1fr}}
-  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);
-    color:var(--dim);font-size:12.5px;text-align:center}
+  code{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-radius:5px;padding:1px 6px;
+    font-family:var(--ds-mono);font-size:13px;color:var(--ds-accent-strong)}
+  pre{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-radius:10px;padding:14px 16px;
+    overflow-x:auto;font-family:var(--ds-mono);font-size:13px;line-height:1.6}
+  pre code{background:none;border:none;padding:0;color:var(--ds-text)}
 </style>
 </head>
 <body>
-<div class="wrap">
-
-<header class="hero">
-  <h1>座舱人员信息提取 · inforExtra</h1>
-  <p class="lead">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型
-    （laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从
-    0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
-  <div class="badges">
-    <span class="badge">laya-multilingual · mmBERT 322M</span>
-    <span class="badge">纯本地推理</span>
-    <span class="badge">0 token 成本</span>
-    <span class="badge amber">单条 ~50ms</span>
-    <span class="badge plain"><a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a></span>
-  </div>
-</header>
-
-<!-- ============ 演示 ============ -->
-<section id="demo">
-  <h2>演示</h2>
-  <p class="sec-note">点下面的例句，看座舱图实时点亮对应座位。</p>
-  <div class="grid2">
-    <div class="card cabin-card">
-      <h3>座舱视图</h3>
-      <svg class="cabin" viewBox="0 0 320 460" aria-label="座舱俯视图">
-        <rect class="car-body" x="54" y="14" width="212" height="432" rx="50"/>
-        <path class="windshield" d="M 84 74 Q 160 44 236 74"/>
-        <circle class="steering" cx="104" cy="104" r="19"/>
-        <g class="seat" id="seat-driver">
-          <rect x="78" y="128" width="62" height="72" rx="15"/>
-          <text class="seat-label" x="109" y="158">主驾</text>
-          <text class="seat-person" x="109" y="180"></text>
-        </g>
-        <g class="seat" id="seat-passenger">
-          <rect x="180" y="128" width="62" height="72" rx="15"/>
-          <text class="seat-label" x="211" y="158">副驾</text>
-          <text class="seat-person" x="211" y="180"></text>
-        </g>
-        <g class="seat" id="seat-rear-left">
-          <rect x="66" y="286" width="56" height="72" rx="14"/>
-          <text class="seat-label" x="94" y="316">后排左</text>
-          <text class="seat-person" x="94" y="338"></text>
-        </g>
-        <g class="seat" id="seat-rear-mid">
-          <rect x="132" y="286" width="56" height="72" rx="14"/>
-          <text class="seat-label" x="160" y="316">后排中</text>
-          <text class="seat-person" x="160" y="338"></text>
-        </g>
-        <g class="seat" id="seat-rear-right">
-          <rect x="198" y="286" width="56" height="72" rx="14"/>
-          <text class="seat-label" x="226" y="316">后排右</text>
-          <text class="seat-person" x="226" y="338"></text>
-        </g>
-      </svg>
-      <div class="cabin-hint" id="cabin-hint">选择一个例句开始</div>
-    </div>
-
-    <div class="card">
-      <h3>对话输入</h3>
-      <div class="examples" id="examples"></div>
-      <div class="quote" id="quote">← 点上面任意例句</div>
-
-      <h3 style="margin-top:20px">提取结果</h3>
-      <div class="persons" id="persons"><div class="empty">等待选择例句…</div></div>
-
-      <div class="perfline" id="perfline">
-        <span>延迟 <b id="m-lat">–</b></span>
-        <span>候选 <b id="m-cand">–</b></span>
-        <span>选择轮问题 <b id="m-r1">–</b></span>
-        <span>属性轮问题 <b id="m-r2">–</b></span>
+  <header class="ds-header">
+    <div class="ds-header__inner">
+      <div class="ds-header__row">
+        <a class="ds-home" href="https://ranpin.github.io/">← 返回主页</a>
+        <h1>座舱人员信息提取 · inforExtra</h1>
+        <span class="ds-badge">🚗 智能座舱</span>
       </div>
-      <p class="replay-note">
-        ⚠️ 本页为<b>预录回放</b>：以上结果均由真实 laya 模型在 Apple M4 Pro 上跑出后固化，
-        非浏览器端实时推理（模型 322M，无法在静态页运行）。
-        要跑真实时推理版（支持任意输入、边打字边提取），见下方「本地运行」。
+      <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
+      <div class="ie-badges">
+        <span class="ie-badge">laya-multilingual · mmBERT 322M</span>
+        <span class="ie-badge">纯本地推理</span>
+        <span class="ie-badge">0 token 成本</span>
+        <span class="ie-badge amber">单条 ~50ms</span>
+        <span class="ie-badge plain"><a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a></span>
+      </div>
+    </div>
+  </header>
+
+  <div class="ds-wrap">
+    <!-- ============ 演示 ============ -->
+    <section class="ds-section" id="demo">
+      <h2 class="ds-h2">演示</h2>
+      <p class="sec-note">点下面的例句，看座舱图实时点亮对应座位。</p>
+      <div class="grid2">
+        <div class="card cabin-card">
+          <h3>座舱视图</h3>
+          <svg class="cabin" viewBox="0 0 320 460" aria-label="座舱俯视图">
+            <rect class="car-body" x="54" y="14" width="212" height="432" rx="50"/>
+            <path class="windshield" d="M 84 74 Q 160 44 236 74"/>
+            <circle class="steering" cx="104" cy="104" r="19"/>
+            <g class="seat" id="seat-driver">
+              <rect x="78" y="128" width="62" height="72" rx="15"/>
+              <text class="seat-label" x="109" y="158">主驾</text>
+              <text class="seat-person" x="109" y="180"></text>
+            </g>
+            <g class="seat" id="seat-passenger">
+              <rect x="180" y="128" width="62" height="72" rx="15"/>
+              <text class="seat-label" x="211" y="158">副驾</text>
+              <text class="seat-person" x="211" y="180"></text>
+            </g>
+            <g class="seat" id="seat-rear-left">
+              <rect x="66" y="286" width="56" height="72" rx="14"/>
+              <text class="seat-label" x="94" y="316">后排左</text>
+              <text class="seat-person" x="94" y="338"></text>
+            </g>
+            <g class="seat" id="seat-rear-mid">
+              <rect x="132" y="286" width="56" height="72" rx="14"/>
+              <text class="seat-label" x="160" y="316">后排中</text>
+              <text class="seat-person" x="160" y="338"></text>
+            </g>
+            <g class="seat" id="seat-rear-right">
+              <rect x="198" y="286" width="56" height="72" rx="14"/>
+              <text class="seat-label" x="226" y="316">后排右</text>
+              <text class="seat-person" x="226" y="338"></text>
+            </g>
+          </svg>
+          <div class="cabin-hint" id="cabin-hint">选择一个例句开始</div>
+        </div>
+
+        <div class="card">
+          <h3>对话输入</h3>
+          <div class="examples" id="examples"></div>
+          <div class="quote" id="quote">← 点上面任意例句</div>
+
+          <h3 style="margin-top:20px">提取结果</h3>
+          <div class="persons" id="persons"><div class="empty">等待选择例句…</div></div>
+
+          <div class="perfline" id="perfline">
+            <span>延迟 <b id="m-lat">–</b></span>
+            <span>候选 <b id="m-cand">–</b></span>
+            <span>选择轮问题 <b id="m-r1">–</b></span>
+            <span>属性轮问题 <b id="m-r2">–</b></span>
+          </div>
+          <p class="replay-note">
+            ⚠️ 本页为<b>预录回放</b>：以上结果均由真实 laya 模型在 Apple M4 Pro 上跑出后固化，
+            非浏览器端实时推理（模型 322M，无法在静态页运行）。
+            要跑真实时推理版（支持任意输入、边打字边提取），见下方「本地运行」。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 评测结果 ============ -->
+    <section class="ds-section" id="results">
+      <h2 class="ds-h2">评测结果</h2>
+      <p class="sec-note">全部数字可用仓库内 <code>compare_results.py</code> 对 gold 集离线复算。</p>
+
+      <div class="tbl-wrap">
+        <table>
+          <caption>表 1 · 扩充集 510 条（10 个模板族，seed=42 构造即标注）</caption>
+          <thead><tr>
+            <th>指标</th><th class="num">laya v1</th><th class="num">laya v3（修复后）</th>
+            <th class="num">qwen3.8-flash（关思考）</th></tr></thead>
+          <tbody>
+            <tr><td>人名 P / R / F1</td><td class="num">0.885 / 0.719 / 0.793</td>
+                <td class="num">0.924 / 0.908 / <b class="best">0.916</b></td>
+                <td class="num"><b class="best">0.964 / 0.964 / 0.964</b></td></tr>
+            <tr><td>位置 / 身份准确率</td><td class="num">0.779 / 0.828</td>
+                <td class="num">0.755 / 0.796</td><td class="num"><b class="best">0.988 / 0.979</b></td></tr>
+            <tr><td>行级全对</td><td class="num">368/510 (72.2%)</td>
+                <td class="num"><b class="best">444/510 (87.1%)</b></td>
+                <td class="num"><b class="best">491/510 (96.3%)</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="tbl-wrap" style="margin-top:18px">
+        <table>
+          <caption>表 2 · 性能对比（同机 51 条，Apple M4 Pro；原始数据 <code>test/results/原始51_*_性能.json</code>）</caption>
+          <thead><tr><th>指标</th><th class="num">旧管线（边车→平台）</th>
+            <th class="num">openjev-seq</th><th class="num">laya forced</th></tr></thead>
+          <tbody>
+            <tr><td>延迟 p50</td><td class="num">0.745s</td><td class="num">1.353s</td>
+                <td class="num"><b class="best">0.044s</b></td></tr>
+            <tr><td>延迟 p95</td><td class="num">1.424s</td><td class="num">3.913s</td>
+                <td class="num"><b class="best">0.050s</b></td></tr>
+            <tr><td>吞吐</td><td class="num">~68 条/分</td><td class="num">38.8 条/分</td>
+                <td class="num"><b class="best">1435 条/分</b></td></tr>
+            <tr><td>加载 / 内存</td><td class="num">远端服务</td><td class="num">4.4s / 0.7GB</td>
+                <td class="num">3.98s / 3.0GB</td></tr>
+            <tr><td>每次调用成本</td><td class="num">1400 prompt + 39 completion tokens</td>
+                <td class="num">本地机时</td><td class="num"><b class="best">本地机时</b></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p class="sec-note" style="margin-top:14px">
+        <b>取舍</b>：flash 精度更高（F1 0.964）但为远端 LLM 调用、按 token 计费；
+        laya 精度略低（0.916）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
+        <span style="color:var(--ds-faint)">（laya vs 旧管线 omni-7b 的 17 倍加速见上方性能表、有 51 条 JSON 支撑；与 flash 的延迟倍数因 flash 延迟未入库，此处不列。）</span>
       </p>
-    </div>
-  </div>
-</section>
+    </section>
 
-<!-- ============ 评测结果 ============ -->
-<section id="results">
-  <h2>评测结果</h2>
-  <p class="sec-note">全部数字可用仓库内 <code>compare_results.py</code> 对 gold 集离线复算。</p>
+    <!-- ============ 方法 ============ -->
+    <section class="ds-section" id="method">
+      <h2 class="ds-h2">方法：类型化决策替代巨型 prompt</h2>
+      <p class="sec-note">旧管线把 2000-token 的抽取规则塞进 prompt 让 LLM 一次输出 JSON；
+        新管线改成一串<b>封闭选项的判别式问题</b>，由 laya 判别式作答（单次调用内并行答全部问题；管线按锚点→扫描→属性分多轮调用）。</p>
+      <div class="cols">
+        <div class="card">
+          <h3>管线</h3>
+          <ul class="tight">
+            <li><b>候选生成</b>：规则抽 CJK 称谓片段（姓氏过滤），不靠模型</li>
+            <li><b>选择轮</b>：所有候选放进同一个 softmax 竞争（forced choice），同一轮调用内定谁是真的</li>
+            <li><b>属性轮</b>：对每个赢家问 location（13 选项）/ identity（15 选项）</li>
+            <li><b>代码层门控</b>：否定句剔除、身份证据校验、称谓碎片清理</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>v1 → v3 的三个免微调修复</h3>
+          <ul class="tight">
+            <li><b>否定门控</b>：『不是/别叫我』引导的候选在代码层剔除——laya 的否定判断本身是噪声（被否定 0.71 vs 未否定 0.79，切不开）。否定句族 0.42 → <b class="best">1.00</b></li>
+            <li><b>锚点回退 + 增量扫描</b>：forced choice 对「小X」类名字系统性失效（0.06 vs 同上下文 noul 0.89），置信度含糊时回退普通扫描。多人族 0.38 → <b class="best">0.85</b></li>
+            <li><b>称谓碎片清理</b>：『陈部』⊂『陈部长』剔除，只认 老/部/经/医/师 首字。称谓无品牌族 0.55 → <b class="best">0.95</b></li>
+          </ul>
+        </div>
+      </div>
+      <p class="sec-note" style="margin-top:14px">
+        <b>已知短板（诚实边界）</b>：同学边界族 0.56（『小陈同学』会被切成『陈同学』）、拉丁名 0.72、
+        困难负例 12 个 FP（马上/高架/张家口）——属零样本上限，微调可解。位置准确率 0.755，左右方位仍会判反。
+      </p>
+      <p class="sec-note" style="margin-top:10px">
+        <b>⚠️ 分布外对抗子集（60 条，<code>eval_adversarial.py</code>）</b>：上面的 0.916 是<b>模板分布内</b>分数。
+        针对代码盲区另测三族各 20 条，人名 F1 掉到 <b>0.474</b>——
+        <b>表外姓</b>（翦/仝/冼/阿宝/大壮，姓氏不在过滤表）<b>20/20 全漏召</b>（surname 过滤的硬召回天花板）；
+        <b>真实否定</b>（别把我当成X / X不是我 / 并非X，线索不在门控表）<b>15/20 误报</b>；
+        <b>ASR 口语噪声</b>（填充/重复）F1 0.878 基本鲁棒。
+        结论：瓶颈在<b>词表覆盖与门控规则</b>（确定性代码边界，扩表/补规则可解），不在模型对真实语音的适应力。详见仓库 README「对抗子集评测」。
+      </p>
+    </section>
 
-  <div class="tbl-wrap">
-    <table>
-      <caption>表 1 · 扩充集 510 条（10 个模板族，seed=42 构造即标注）</caption>
-      <thead><tr>
-        <th>指标</th><th class="num">laya v1</th><th class="num">laya v3（修复后）</th>
-        <th class="num">qwen3.8-flash（关思考）</th></tr></thead>
-      <tbody>
-        <tr><td>人名 P / R / F1</td><td class="num">0.885 / 0.719 / 0.793</td>
-            <td class="num">0.924 / 0.908 / <b class="best">0.916</b></td>
-            <td class="num"><b class="best">0.964 / 0.964 / 0.964</b></td></tr>
-        <tr><td>位置 / 身份准确率</td><td class="num">0.779 / 0.828</td>
-            <td class="num">0.755 / 0.796</td><td class="num"><b class="best">0.988 / 0.979</b></td></tr>
-        <tr><td>行级全对</td><td class="num">368/510 (72.2%)</td>
-            <td class="num"><b class="best">444/510 (87.1%)</b></td>
-            <td class="num"><b class="best">491/510 (96.3%)</b></td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <div class="tbl-wrap" style="margin-top:18px">
-    <table>
-      <caption>表 2 · 性能对比（同机 51 条，Apple M4 Pro；原始数据 <code>test/results/原始51_*_性能.json</code>）</caption>
-      <thead><tr><th>指标</th><th class="num">旧管线（边车→平台）</th>
-        <th class="num">openjev-seq</th><th class="num">laya forced</th></tr></thead>
-      <tbody>
-        <tr><td>延迟 p50</td><td class="num">0.745s</td><td class="num">1.353s</td>
-            <td class="num"><b class="best">0.044s</b></td></tr>
-        <tr><td>延迟 p95</td><td class="num">1.424s</td><td class="num">3.913s</td>
-            <td class="num"><b class="best">0.050s</b></td></tr>
-        <tr><td>吞吐</td><td class="num">~68 条/分</td><td class="num">38.8 条/分</td>
-            <td class="num"><b class="best">1435 条/分</b></td></tr>
-        <tr><td>加载 / 内存</td><td class="num">远端服务</td><td class="num">4.4s / 0.7GB</td>
-            <td class="num">3.98s / 3.0GB</td></tr>
-        <tr><td>每次调用成本</td><td class="num">1400 prompt + 39 completion tokens</td>
-            <td class="num">本地机时</td><td class="num"><b class="best">本地机时</b></td></tr>
-      </tbody>
-    </table>
-  </div>
-
-  <p class="sec-note" style="margin-top:14px">
-    <b>取舍</b>：flash 精度更高（F1 0.964）但为远端 LLM 调用、按 token 计费；
-    laya 精度略低（0.916）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
-    <span style="color:var(--dim)">（laya vs 旧管线 omni-7b 的 17 倍加速见上方性能表、有 51 条 JSON 支撑；与 flash 的延迟倍数因 flash 延迟未入库，此处不列。）</span>
-  </p>
-</section>
-
-<!-- ============ 方法 ============ -->
-<section id="method">
-  <h2>方法：类型化决策替代巨型 prompt</h2>
-  <p class="sec-note">旧管线把 2000-token 的抽取规则塞进 prompt 让 LLM 一次输出 JSON；
-    新管线改成一串<b>封闭选项的判别式问题</b>，由 laya 判别式作答（单次调用内并行答全部问题；管线按锚点→扫描→属性分多轮调用）。</p>
-  <div class="cols">
-    <div class="card">
-      <h3>管线</h3>
-      <ul class="tight">
-        <li><b>候选生成</b>：规则抽 CJK 称谓片段（姓氏过滤），不靠模型</li>
-        <li><b>选择轮</b>：所有候选放进同一个 softmax 竞争（forced choice），同一轮调用内定谁是真的</li>
-        <li><b>属性轮</b>：对每个赢家问 location（13 选项）/ identity（15 选项）</li>
-        <li><b>代码层门控</b>：否定句剔除、身份证据校验、称谓碎片清理</li>
-      </ul>
-    </div>
-    <div class="card">
-      <h3>v1 → v3 的三个免微调修复</h3>
-      <ul class="tight">
-        <li><b>否定门控</b>：『不是/别叫我』引导的候选在代码层剔除——laya 的否定判断本身是噪声（被否定 0.71 vs 未否定 0.79，切不开）。否定句族 0.42 → <b class="best">1.00</b></li>
-        <li><b>锚点回退 + 增量扫描</b>：forced choice 对「小X」类名字系统性失效（0.06 vs 同上下文 noul 0.89），置信度含糊时回退普通扫描。多人族 0.38 → <b class="best">0.85</b></li>
-        <li><b>称谓碎片清理</b>：『陈部』⊂『陈部长』剔除，只认 老/部/经/医/师 首字。称谓无品牌族 0.55 → <b class="best">0.95</b></li>
-      </ul>
-    </div>
-  </div>
-  <p class="sec-note" style="margin-top:14px">
-    <b>已知短板（诚实边界）</b>：同学边界族 0.56（『小陈同学』会被切成『陈同学』）、拉丁名 0.72、
-    困难负例 12 个 FP（马上/高架/张家口）——属零样本上限，微调可解。位置准确率 0.755，左右方位仍会判反。
-  </p>
-  <p class="sec-note" style="margin-top:10px">
-    <b>⚠️ 分布外对抗子集（60 条，<code>eval_adversarial.py</code>）</b>：上面的 0.916 是<b>模板分布内</b>分数。
-    针对代码盲区另测三族各 20 条，人名 F1 掉到 <b>0.474</b>——
-    <b>表外姓</b>（翦/仝/冼/阿宝/大壮，姓氏不在过滤表）<b>20/20 全漏召</b>（surname 过滤的硬召回天花板）；
-    <b>真实否定</b>（别把我当成X / X不是我 / 并非X，线索不在门控表）<b>15/20 误报</b>；
-    <b>ASR 口语噪声</b>（填充/重复）F1 0.878 基本鲁棒。
-    结论：瓶颈在<b>词表覆盖与门控规则</b>（确定性代码边界，扩表/补规则可解），不在模型对真实语音的适应力。详见仓库 README「对抗子集评测」。
-  </p>
-</section>
-
-<!-- ============ 本地运行 ============ -->
-<section id="run">
-  <h2>本地运行（实时推理版）</h2>
-  <p class="sec-note">仓库内的 <code>demo/</code> 是真实时推理版：支持任意输入、边打字边提取（debounce 350ms）。</p>
-  <div class="card">
+    <!-- ============ 本地运行 ============ -->
+    <section class="ds-section" id="run">
+      <h2 class="ds-h2">本地运行（实时推理版）</h2>
+      <p class="sec-note">仓库内的 <code>demo/</code> 是真实时推理版：支持任意输入、边打字边提取（debounce 350ms）。</p>
+      <div class="card">
 <pre><code>git clone https://github.com/ranpin/inforExtra.git
 cd inforExtra
 pip install -r requirements.txt        # 含 laya / torch
 
 python demo/server.py                  # 启动时预加载模型，约 3-5s
 # 浏览器打开 http://127.0.0.1:8000</code></pre>
-    <ul class="tight">
-      <li>默认已置 v3 最优配置：<code>JEV_BACKEND=laya</code> <code>JEV_CANDIDATE_FILTER=surname</code> <code>JEV_ASSEMBLY=forced</code></li>
-      <li>HF 主站不可达的环境会自动走本地缓存（<code>HF_HUB_OFFLINE=1</code>）</li>
-      <li>demo 服务只用 Python 标准库 <code>http.server</code>，不引入额外 Web 框架依赖</li>
-      <li>评测复现：<code>python compare_results.py test/results/扩充510_laya强制选择v3.xlsx test/测试集_扩充10x_gold.xlsx</code></li>
-    </ul>
-  </div>
-</section>
+        <ul class="tight">
+          <li>默认已置 v3 最优配置：<code>JEV_BACKEND=laya</code> <code>JEV_CANDIDATE_FILTER=surname</code> <code>JEV_ASSEMBLY=forced</code></li>
+          <li>HF 主站不可达的环境会自动走本地缓存（<code>HF_HUB_OFFLINE=1</code>）</li>
+          <li>demo 服务只用 Python 标准库 <code>http.server</code>，不引入额外 Web 框架依赖</li>
+          <li>评测复现：<code>python compare_results.py test/results/扩充510_laya强制选择v3.xlsx test/测试集_扩充10x_gold.xlsx</code></li>
+        </ul>
+      </div>
+    </section>
 
-<footer>
-  inforExtra · 数据与代码见 <a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a>
-  · 本页 demo 为真实推理结果的预录回放
-</footer>
-</div>
+    <footer class="ds-footer">
+      inforExtra · 数据与代码见 <a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a>
+      · 本页 demo 为真实推理结果的预录回放
+    </footer>
+  </div>
 
 <script>
 "use strict";
