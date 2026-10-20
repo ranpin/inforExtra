@@ -7,12 +7,14 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🚗</text></svg>">
 <!-- 共享演示页外壳（配色/页头/章节/页脚统一，单一事实源在主站 public/demo-shell.css） -->
 <link rel="stylesheet" href="https://ranpin.github.io/demo-shell.css">
+<!-- 明暗主题：同步加载，首屏绘制前应用已存主题，避免闪烁 -->
+<script src="https://ranpin.github.io/theme.js"></script>
 <style>
   /* 本页专属组件（徽章/座舱图/交互区/表格），结构色一律引用外壳 --ds-* 变量 */
   .ie-badges{display:flex;gap:8px;flex-wrap:wrap;margin:.95rem 0 0}
   .ie-badge{font-size:12px;color:var(--ds-accent-strong);background:var(--ds-accent-soft);
     border:1px solid var(--ds-accent-ring);padding:3px 11px;border-radius:999px}
-  .ie-badge.amber{color:#b45309;background:#fffbeb;border-color:#fde68a}
+  .ie-badge.amber{color:var(--ds-warn);background:var(--ds-warn-soft);border-color:var(--ds-warn-ring)}
   .ie-badge.plain{color:var(--ds-muted);background:var(--ds-code-bg);border-color:var(--ds-border)}
   .ie-badge.plain a{color:inherit;text-decoration:none}
   .ie-badge.plain a:hover{color:var(--ds-accent)}
@@ -27,17 +29,17 @@
   /* ---- 座舱图（亮色） ---- */
   .cabin-card{display:flex;flex-direction:column;align-items:center}
   svg.cabin{width:100%;max-width:290px;height:auto}
-  .car-body{fill:#f1f5f9;stroke:#cbd5e1;stroke-width:2.5}
-  .windshield{fill:none;stroke:#e2e8f0;stroke-width:2}
-  .steering{fill:none;stroke:#cbd5e1;stroke-width:3}
-  .seat rect{fill:#f8fafc;stroke:#cbd5e1;stroke-width:1.5;transition:all .25s ease}
-  .seat .seat-label{fill:#64748b;font-size:11px;text-anchor:middle;transition:fill .25s}
+  .car-body{fill:var(--ds-code-bg);stroke:var(--ds-border);stroke-width:2.5}
+  .windshield{fill:none;stroke:var(--ds-border);stroke-width:2}
+  .steering{fill:none;stroke:var(--ds-border);stroke-width:3}
+  .seat rect{fill:var(--ds-panel);stroke:var(--ds-border);stroke-width:1.5;transition:all .25s ease}
+  .seat .seat-label{fill:var(--ds-muted);font-size:11px;text-anchor:middle;transition:fill .25s}
   .seat .seat-person{fill:var(--ds-accent);font-size:13px;font-weight:700;text-anchor:middle;opacity:0;transition:opacity .25s}
   .seat.occupied rect{fill:var(--ds-accent-soft);stroke:var(--ds-accent);filter:drop-shadow(0 0 5px var(--ds-accent-ring))}
   .seat.occupied .seat-label{fill:var(--ds-accent)}
   .seat.occupied .seat-person{opacity:1}
-  .seat.zone rect{fill:#fffbeb;stroke:#d97706}
-  .seat.zone .seat-label{fill:#b45309}
+  .seat.zone rect{fill:var(--ds-warn-soft);stroke:var(--ds-warn)}
+  .seat.zone .seat-label{fill:var(--ds-warn)}
   .cabin-hint{color:var(--ds-faint);font-size:12px;margin-top:10px;text-align:center;min-height:18px}
 
   /* ---- 交互区 ---- */
@@ -56,7 +58,7 @@
   .person .name{font-weight:700;font-size:15.5px}
   .person .tag{font-size:12px;color:var(--ds-muted);background:var(--ds-code-bg);border:1px solid var(--ds-border);padding:2px 8px;border-radius:6px}
   .person .tag.loc{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring)}
-  .person .tag.id{color:#b45309;border-color:#fde68a}
+  .person .tag.id{color:var(--ds-warn);border-color:var(--ds-warn-ring)}
   .empty{color:var(--ds-faint);font-size:13.5px;padding:6px 2px}
   .perfline{margin-top:14px;padding-top:12px;border-top:1px solid var(--ds-border);
     font-size:12.5px;color:var(--ds-muted);display:flex;gap:18px;flex-wrap:wrap}
@@ -89,7 +91,7 @@
       <div class="ds-header__row">
         <a class="ds-home" href="https://ranpin.github.io/">← 返回主页</a>
         <h1>座舱人员信息提取 · inforExtra</h1>
-        <span class="ds-badge">🚗 智能座舱</span>
+        <button class="ds-theme-btn" type="button" onclick="toggleTheme()" aria-label="切换明暗主题"><span class="ds-theme-icon">🌙</span></button>
       </div>
       <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
       <div class="ie-badges">
