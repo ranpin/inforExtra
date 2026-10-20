@@ -11,7 +11,9 @@
 <script src="https://ranpin.github.io/theme.js"></script>
 <style>
   /* 本页专属组件（徽章/座舱图/交互区/表格），结构色一律引用外壳 --ds-* 变量 */
-  .ie-badges{display:flex;gap:8px;flex-wrap:wrap;margin:.95rem 0 0}
+  /* justify-content:center：页头已通栏，徽章行换行时各行也要居中（外壳的 align-items:center
+     只负责整块居中，管不到 flex 容器内部的换行对齐） */
+  .ie-badges{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:.95rem 0 0}
   .ie-badge{font-size:12px;color:var(--ds-accent-strong);background:var(--ds-accent-soft);
     border:1px solid var(--ds-accent-ring);padding:3px 11px;border-radius:999px}
   .ie-badge.amber{color:var(--ds-warn);background:var(--ds-warn-soft);border-color:var(--ds-warn-ring)}
