@@ -50,7 +50,7 @@ def warmup():
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "inforExtraDemo/1.0"
+    server_version = "jevCabinDemo/1.0"
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body if isinstance(body, bytes) else body.encode("utf-8")

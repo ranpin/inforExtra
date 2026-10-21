@@ -1,6 +1,6 @@
 # Qwen车载智能助手
 
-> 🎬 **在线 Demo**：<https://ranpin.github.io/inforExtra/>
+> 🎬 **在线 Demo**：<https://ranpin.github.io/jevCabin/>
 
 这是一个车载智能助手，专为汽车座舱场景设计，能够从对话中提取车内人员信息和空间位置信息并格式化输出。
 
@@ -8,7 +8,7 @@
 
 ## 演示 Demo
 
-**在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/inforExtra/>
+**在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
 
 **本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
 

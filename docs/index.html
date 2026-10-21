@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>inforExtra · 座舱人员信息提取</title>
+<title>jevCabin · 座舱人员信息提取</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🚗</text></svg>">
 <!-- 共享演示页外壳（配色/页头/章节/页脚统一，单一事实源在主站 public/demo-shell.css） -->
 <link rel="stylesheet" href="https://ranpin.github.io/demo-shell.css">
@@ -92,7 +92,7 @@
     <div class="ds-header__inner">
       <div class="ds-header__row">
         <a class="ds-home" href="https://ranpin.github.io/">← 返回主页</a>
-        <h1>座舱人员信息提取 · inforExtra</h1>
+        <h1>座舱人员信息提取 · jevCabin</h1>
         <button class="ds-theme-btn" type="button" onclick="toggleTheme()" aria-label="切换明暗主题"><span class="ds-theme-icon">🌙</span></button>
       </div>
       <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
@@ -101,7 +101,7 @@
         <span class="ie-badge">纯本地推理</span>
         <span class="ie-badge">0 token 成本</span>
         <span class="ie-badge amber">单条 ~50ms</span>
-        <span class="ie-badge plain"><a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a></span>
+        <span class="ie-badge plain"><a href="https://github.com/ranpin/jevCabin">github.com/ranpin/jevCabin</a></span>
       </div>
     </div>
   </header>
@@ -264,8 +264,8 @@
       <h2 class="ds-h2">本地运行（实时推理版）</h2>
       <p class="sec-note">仓库内的 <code>demo/</code> 是真实时推理版：支持任意输入、边打字边提取（debounce 350ms）。</p>
       <div class="card">
-<pre><code>git clone https://github.com/ranpin/inforExtra.git
-cd inforExtra
+<pre><code>git clone https://github.com/ranpin/jevCabin.git
+cd jevCabin
 pip install -r requirements.txt        # 含 laya / torch
 
 python demo/server.py                  # 启动时预加载模型，约 3-5s
@@ -280,7 +280,7 @@ python demo/server.py                  # 启动时预加载模型，约 3-5s
     </section>
 
     <footer class="ds-footer">
-      inforExtra · 数据与代码见 <a href="https://github.com/ranpin/inforExtra">github.com/ranpin/inforExtra</a>
+      jevCabin · 数据与代码见 <a href="https://github.com/ranpin/jevCabin">github.com/ranpin/jevCabin</a>
       · 本页 demo 为真实推理结果的预录回放
     </footer>
   </div>
