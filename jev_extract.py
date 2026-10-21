@@ -60,6 +60,9 @@ SURNAME_CHARS = set(
     "王李张刘陈杨黄赵吴周徐孙马朱胡郭何林罗高郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘"
     "于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江"
     "尹薛闫段雷侯龙史陶黎贺顾毛郝龚万钱严覃武戴莫孔向汤"
+    # v4：无普通词冲突面的生僻姓（对抗集表外姓盲区）。商/迟/展/初/福/贵 等
+    # 易撞词姓仍排除（同 司/老/同 原则），其「X+称谓」形态由 TITLE_SUFFIXES 覆盖
+    "翦仝佟佘菅庹慕言"
 )
 COMPOUND_SURNAMES = frozenset((
     "欧阳", "司马", "诸葛", "上官", "夏侯", "皇甫", "尉迟", "公孙", "令狐", "长孙",
@@ -70,10 +73,19 @@ COMPOUND_SURNAMES = frozenset((
 # 若存在同起点更长候选，几乎必是称谓碎片（陈部 ⊂ 陈部长）
 TITLE_HEAD_CHARS = frozenset("老部经医师")
 
+# v4：「单字+人物称谓」候选锚点：这些词几乎不会出现在非人物词的词尾，
+# 可不开姓氏表就放行表外姓的称谓形态（翦老师/佟老板/撒师傅…）。
+# 不含 总/工：撞 总结/汇总/工作/工程（同 马上/高架 困难负例类别）
+TITLE_SUFFIXES = ("老师", "医生", "经理", "老板", "师傅")
+# 称谓前的常见动词/量词（看医生/当老师/那位经理）不是称呼，不生成候选
+TITLE_PREFIX_BLOCK = frozenset("看找做当像个位些问帮")
+
 # 候选片段中出现这些字符即丢弃（功能词/动词/问候语，几乎不可能出现在姓名或称谓里）
 STOPWORD_CHARS = set(
     "的我你他她它是在坐了有叫别不这那就都也还很吗吧啊呢给和跟向对把让被从到说"
     "快打招呼请问候兴见真早"
+    # v4：句尾语气词与否定动词「没」（ASR 口语碎片「小吴哈/周总没错」），无姓名含这些字
+    "哈嘛哦诶嗯呗啦咯呀哟哇嘞没"
 )
 
 LOCATION_OPTIONS = [
@@ -106,17 +118,20 @@ NO_IDENTITY = "未提及"
 def _keep_cjk_span(s):
     """surname 过滤模式：只保留像中文人名的片段。
 
-    规则：单字姓开头的 2-3 字片段 / 复姓开头的 3-4 字片段 / 小X（2-3 字）。
+    规则：单字姓开头的 2-3 字片段 / 复姓开头的 3-4 字片段 /
+    小X、阿X 昵称（2-3 字）/ 单字+人物称谓（X老师，v4）。
     span 模式（默认）全部保留。
     """
     if CANDIDATE_FILTER != "surname":
         return True
     w = len(s)
-    if s[0] == "小" and 2 <= w <= 3:
+    if s[0] in ("小", "阿") and 2 <= w <= 3:
         return True
     if 2 <= w <= 3 and s[0] in SURNAME_CHARS:
         return True
     if 3 <= w <= 4 and s[:2] in COMPOUND_SURNAMES:
+        return True
+    if w == 3 and s[1:] in TITLE_SUFFIXES and s[0] not in TITLE_PREFIX_BLOCK:
         return True
     return False
 
@@ -162,6 +177,12 @@ def generate_candidates(text):
                 and c["text"][1] in TITLE_HEAD_CHARS
                 and any(o["start"] == c["start"] and len(o["text"]) > 2
                         for o in cands)):
+            continue
+        # v4 叠字碎片：ASR 重复「王总王总」会生成「王总王」——前 len-1 字
+        # 已是候选且末字等于其首字，必是重复截断碎片，剔除
+        t = c["text"]
+        if (len(t) >= 3 and t[-1] == t[0]
+                and any(o["text"] == t[:-1] for o in cands)):
             continue
         cleaned.append(c)
     return cleaned[:MAX_CANDIDATES]
