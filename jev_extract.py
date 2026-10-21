@@ -69,9 +69,9 @@ COMPOUND_SURNAMES = frozenset((
     "慕容", "司徒", "端木", "东方", "独孤", "南宫", "呼延", "西门", "第五", "淳于",
     "单于", "太叔", "申屠", "仲孙", "轩辕", "百里", "东郭", "南门", "羊舌", "微生",
 ))
-# 多字称谓的首字（老师/部长/经理/医生/师傅）：姓+这些字的 2 字片段
-# 若存在同起点更长候选，几乎必是称谓碎片（陈部 ⊂ 陈部长）
-TITLE_HEAD_CHARS = frozenset("老部经医师")
+# 多字称谓的首字（老师/部长/经理/医生/师傅/同学）：姓+这些字的 2 字片段
+# 若存在同起点更长候选，几乎必是称谓碎片（陈部 ⊂ 陈部长，陈同 ⊂ 陈同学）
+TITLE_HEAD_CHARS = frozenset("老部经医师同")
 
 # v4：「单字+人物称谓」候选锚点：这些词几乎不会出现在非人物词的词尾，
 # 可不开姓氏表就放行表外姓的称谓形态（翦老师/佟老板/撒师傅…）。
@@ -79,6 +79,14 @@ TITLE_HEAD_CHARS = frozenset("老部经医师")
 TITLE_SUFFIXES = ("老师", "医生", "经理", "老板", "师傅")
 # 称谓前的常见动词/量词（看医生/当老师/那位经理）不是称呼，不生成候选
 TITLE_PREFIX_BLOCK = frozenset("看找做当像个位些问帮")
+
+# v4 称谓后缀拆分：赢家形如『X+称谓』（陈同学）且原文恰有候选止于称谓起点
+# （小陈）时，拆成 name=小陈 + 身份证据=同学。gold 约定：『小陈同学』=
+# 小陈+身份同学；『陈同学』（文中无小陈）整体留名、身份为空。
+SPLIT_SUFFIXES = ("同学", "老师", "师傅", "先生", "小姐", "女士")
+# 裸称谓词：紧跟在另一候选之后时（bob小姐）是该人物的称谓，不是独立人物
+BARE_TITLE_WORDS = frozenset(("同学", "老师", "师傅", "先生", "小姐", "女士",
+                              "医生", "经理", "老板", "部长", "司机", "护士"))
 
 # 候选片段中出现这些字符即丢弃（功能词/动词/问候语，几乎不可能出现在姓名或称谓里）
 STOPWORD_CHARS = set(
@@ -184,8 +192,21 @@ def generate_candidates(text):
         if (len(t) >= 3 and t[-1] == t[0]
                 and any(o["text"] == t[:-1] for o in cands)):
             continue
+        # v4 裸称谓：「bob小姐」的『小姐』紧跟另一候选，是其称谓而非独立人物
+        if t in BARE_TITLE_WORDS and any(o["end"] == c["start"] for o in cands):
+            continue
         cleaned.append(c)
-    return cleaned[:MAX_CANDIDATES]
+    # v4 第二遍：称谓前缀碎片（小陈同 = 小陈 + 同）。前缀候选必须在第一遍
+    # 存活——否则会把 冯老师（前缀 冯老 本身是待清理碎片）误杀成碎片
+    final = []
+    for c in cleaned:
+        t = c["text"]
+        if (len(t) >= 3 and t[-1] in TITLE_HEAD_CHARS
+                and any(o["text"] == t[:-1] and o["start"] == c["start"]
+                        for o in cleaned)):
+            continue
+        final.append(c)
+    return final[:MAX_CANDIDATES]
 
 
 # ---------------------------------------------------------------- 问题构造
@@ -298,6 +319,30 @@ def _backward_negated(text, cands):
                         negated.add(c["id"])
             start = q + 1
     return negated
+
+
+def _title_split(cands, winner):
+    """v4 称谓后缀拆分：返回 (替换候选, 称谓后缀)。
+
+    赢家形如『X+称谓』（陈同学）且原文有候选恰止于称谓起点（小陈，
+    须与赢家重叠——同一人物的不同写法）时返回该候选；无替换则为 None。
+    """
+    t = winner["text"]
+    for suf in SPLIT_SUFFIXES:
+        if t.endswith(suf) and len(t) > len(suf):
+            split_pos = winner["end"] - len(suf)
+            repl = next((c for c in cands
+                         if c["end"] == split_pos and overlaps(c, winner)), None)
+            return repl, suf
+    return None, None
+
+
+def _following_title(text, cand):
+    """原文中紧跟候选之后的称谓后缀（小陈 后接 同学），无则 None。"""
+    for suf in SPLIT_SUFFIXES:
+        if text[cand["end"]:cand["end"] + len(suf)] == suf:
+            return suf
+    return None
 
 
 def group_overlapping(passing):
@@ -695,9 +740,18 @@ def _extract_forced(user_input, backend, cands):
             n_q2 = len(rest)
         winners = winners[:FORCED_MAX_PERSONS]
 
+    # --- v4 称谓后缀拆分：陈同学 → 小陈 + 身份证据 同学（仅当原文存在
+    # 止于称谓起点的重叠候选时触发；赢家已是小陈则只取后缀作身份证据）---
+    split_winners = []
+    for c, p in winners:
+        repl, suf = _title_split(cands, c)
+        if repl is None:
+            suf = _following_title(user_input, c)
+        split_winners.append((repl or c, p, suf))
+
     # --- 属性轮：每个赢家取 location/identity ---
     persons = []
-    for c, _p in winners:
+    for c, _p, suf in split_winners:
         t0 = time.perf_counter()
         try:
             attr = backend.ask(user_input, {
@@ -717,6 +771,12 @@ def _extract_forced(user_input, backend, cands):
         ident = _answer_value(attr, "id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
         if not _identity_supported(user_input, c["text"], ident):
+            ident = ""
+        # 拆分携带的身份证据优先（同学/老师 ∈ 选项表）；身份是名字自身
+        # 后缀时按 gold 约定抑制（陈同学+同学 / 陈部长+部长 → 称谓留在名中，身份空）
+        if suf and suf in IDENTITY_OPTIONS:
+            ident = suf
+        if ident and c["text"].endswith(ident):
             ident = ""
         persons.append({
             "name": c["text"],
@@ -822,6 +882,9 @@ def extract_entities(user_input):
         ident = _answer_value(answers, f"c{c['id']}_id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
         if not _identity_supported(user_input, c["text"], ident):
+            ident = ""
+        # v4 同 forced 路径约定：身份是名字自身后缀时抑制（陈同学+同学 → 身份空）
+        if ident and c["text"].endswith(ident):
             ident = ""
         persons.append({
             "name": c["text"],
