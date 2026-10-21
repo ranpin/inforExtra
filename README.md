@@ -1,331 +1,68 @@
-# Qwen车载智能助手
+# jevCabin · Qwen 车载智能助手
 
 > 🎬 **在线 Demo**：<https://ranpin.github.io/jevCabin/>
 
-这是一个车载智能助手，专为汽车座舱场景设计，能够从对话中提取车内人员信息和空间位置信息并格式化输出。
+车载座舱智能助手，专为汽车座舱场景设计：对话回答通过 OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B；**信息提取使用 Jev 类型化决策模型**（本地 Laya 后端），从对话中抽取车内人员信息（姓名/身份）和座位位置并格式化输出。
 
-对话回答通过 OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B；信息提取使用 **Jev 类型化决策模型**（见下文「信息提取架构」）。
+核心思路：用类型化决策模型（单次前向返回校准概率、不生成任何文本）替代旧版「约 2000 token 巨型 prompt + LLM 生成 JSON + 字符串切割解析」——结构化输出错误率按构造为 0，每个判定带可按场景调节的置信度。
+
+## 核心结果
+
+零样本、纯本地、零 token 成本（Apple M4 Pro / MPS）：
+
+- **人名 F1 0.916**（510 条扩充集，laya v3；原始 51 条 v1 0.936 → v3 0.957）
+- **单条延迟 p50 0.044s、吞吐 1435 条/分钟**——比旧管线（p50 0.745s）**快 17 倍**
+- **诚实边界**：分布外对抗子集（表外姓/真实否定/ASR 噪声）F1 0.474——瓶颈是确定性代码边界（词表覆盖 + 门控规则），非模型能力
+
+📊 完整评测（51 条 / 510 条 / 对抗子集、按模板族分解、v1→v3 工程修复、全部复现命令）→ **[docs/evaluation.md](docs/evaluation.md)**
+
+## 功能特点
+
+1. 对话问答：OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B（可指向本地边车服务）
+2. 结构化提取：Jev（System One 决策模型）完成车内人员/位置提取，人员与位置关联显示
+3. 提取范围限定：只对用户输入提取，不对模型回答二次提取；不提取地理地址
+4. 批量测试集处理与结果报告（P/R/F1 + 位置/身份 + 按模板族分解）
+
+## 应用场景
+
+智能车载助手 · 车内人员识别与管理 · 座椅个性化设置 · 车内环境控制
 
 ## 演示 Demo
 
-**在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
-
-**本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
+- **在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
+- **本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
 
 ```bash
 python demo/server.py   # 启动时预加载模型约 3-5s，然后打开 http://127.0.0.1:8000
 ```
 
-- `demo/`：实时推理版——`server.py`（后端，仅用标准库 `http.server`，无额外 Web 框架依赖）+ `index.html`（座舱俯视图，随输入实时点亮座位）
-- `docs/index.html`：线上展示页（预录回放版，由 GitHub Pages 承载；模型 322M 无法在静态页运行，故用真实推理结果固化）
+`demo/` = server.py（后端，仅标准库 http.server）+ index.html（座舱俯视图，随输入实时点亮座位）；`docs/index.html` = 线上展示页（模型 322M 无法在静态页运行，故用真实推理结果固化）。
 
-## 功能特点
+## 快速开始
 
-1. 通过OpenAI兼容API调用Qwen-2.5-Omni-7B模型实现对话问答
-2. 使用 Jev（System One 决策模型）完成车内人员/位置的结构化提取
-3. 自动从用户输入中提取车内人员信息（姓名、身份等）和车内空间位置信息
-4. 格式化输出对话内容和提取的信息，人员与位置信息关联显示
-5. 支持批量处理测试集数据并生成结果报告
-
-## 应用场景
-
-专为汽车座舱场景设计，适用于：
-- 智能车载助手
-- 车内人员识别与管理
-- 座椅个性化设置
-- 车内环境控制
-
-## 技术特性
-
-### 特殊信息提取能力
-1. **人物与位置关联提取**：
-   - 提取人物姓名、称呼和身份关系
-   - 同时提取每个人物所在的车内空间位置
-   - 实现人员与位置的关联映射
-
-2. **车内空间位置提取**：
-   - 专门提取车内空间位置信息
-   - 支持位置：主驾、副驾、前排、后排、后排左侧、后排右侧等
-   - 不提取地理地址或外部地点信息
-
-3. **信息提取范围限定**：
-   - 只对用户输入的内容进行信息提取
-   - 不对模型的回答内容进行二次提取
-
-### 输出格式优化
-- 人员信息与位置信息关联显示
-- 清晰展示车内人员分布情况
-- 便于后续系统处理和应用
-
-## 信息提取架构（Jev）
-
-[Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 是 TypeSafe AI 发布的「System One」类型化决策模型：输入一段文本（state）和一组带类型的问题，单次请求返回每个问题的**校准概率**，不生成任何文本。三种问题原语：
-
-- `Choice`：从 ≤255 个候选中选一个（返回选项 + 概率分布 + 置信度）
-- `Score`：2–10 级有序量表打分
-- `Noul`：是/否判断，返回 p(yes)
-
-Jev 不能生成文本，因此人名这类开放词表值由代码先给出候选、再让 Jev 挑选（官方推荐模式）。`jev_extract.py` 的提取管线：
-
-1. **候选生成**（纯代码）：枚举输入中所有 2–4 字中文片段和拉丁词，过滤含功能词的片段
-2. **第一轮提问**（一次请求，投机扇出）：对每个候选并行问 4 个问题——
-   - `Noul` 『X』是这句话中提到的某个人物的名字或称呼
-   - `Noul` 这句话否定或纠正了『X』这个称呼（处理"我不是陈总"类用例）
-   - `Choice` 『X』坐在车内哪个位置（闭集：主驾/副驾/后排左边/…/未提及）
-   - `Choice` 『X』的身份或称谓（半闭集：同事/同学/老师/…/未提及）
-3. **第二轮消歧**（仅在需要时）：互相重叠的候选（如"小陈/陈同学/小陈同学"）用一次 `Choice` 让 Jev 选出最准确的称呼
-4. **代码组装**：按概率阈值过滤、去重，输出与旧版一致的 `{"persons": [{"name", "identity", "location"}]}`
-
-相比旧版「约 2000 token 的巨型 prompt + LLM 生成 JSON + 字符串切割解析」：
-- 结构化输出错误率按构造为 0（不存在 JSON 解析失败）
-- 品牌名（日产/吉利）、方位词、人称代词的排除从「prompt 规则」变为「可测量的概率」
-- 每个判定带置信度，阈值可按场景调节（`JEV_IS_PERSON_THRESHOLD` 等）
-
-### Jev 后端配置
-
-通过 `.env` 或环境变量选择后端（默认 `auto`：有 `TYPESAFE_API_KEY` 走官方 API，否则依次尝试本地 laya / open-jev）：
-
-```
-JEV_BACKEND=auto            # auto | typesafe | laya | openjev | dryrun
-TYPESAFE_API_KEY=sk-...     # TypeSafe 官方 API（早期访问需 waitlist）
-JEV_MODEL=jev-latest        # 官方 API 模型版本（调过阈值后建议固定版本号）
-LAYA_MODEL=convaiinnovations/laya          # 本地 Laya（推荐，多语言）
-LAYA_SUBFOLDER=multilingual                # 中文必须走 multilingual
-JEV_CANDIDATE_FILTER=surname               # laya 推荐：姓氏候选过滤
-JEV_ASSEMBLY=forced                        # laya 推荐：迭代强制选择组装
-OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（仅英文）
-```
-
-- **typesafe**：官方托管 API（`POST https://api.typesafe.ai/v1/systemone`），需要 `pip install requests`，key 从 console.typesafe.ai 获取
-- **laya**：本地 Laya（Convai Innovations，Apache-2.0，mmBERT-base 多语言，MPS/CPU 可跑），需要 `pip install laya`；中文实测最优配置为 `JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced`（见下文实测结果）
-- **openjev**：本地开源复现（DeBERTa-v3-large，Apache-2.0，CPU 可跑），需要
-  `pip install git+https://github.com/kotoba-lang/typed-decisions`；英文训练，中文零样本不可用（已实测）
-- **dryrun**：不调用任何模型，只打印将要发送的问题结构，用于离线检查
-
-> ⚠️ 官方 API 与开源模型均未公布中文专项基准，中文车载话语属于分布外场景，使用前请先用测试集实测（见下）。
-
-### 实测结果（2026-09-22~24，Apple M4 Pro / 24GB / MPS）
-
-数据：`test/测试集.xlsx` 全部 51 条；gold：`test/测试集_结果.xlsx`（旧管线 10.23 全量通过的输出）。
-
-**准确率对比（零样本，无任何微调）**：
-
-| 配置 | 人名 P/R/F1 | 位置准确率 | 身份准确率 | 行级全对 |
-|---|---|---|---|---|
-| 旧管线 Qwen-2.5-Omni-7B | （gold 来源） | — | — | 50/50 |
-| open-jev（span 候选 + noul 扇出） | 0.253/0.532/0.342 | 0.680 | 0.600 | 8/50 |
-| laya 扇出（姓氏过滤，noul 门控） | 1.000/0.170/0.291 | 0.875 | 0.000 | 11/50 |
-| **laya 强制选择（姓氏过滤 + forced + 身份证据门控，v1）** | **0.936/0.936/0.936** | **0.841** | **0.955** | **46/50** |
-
-复现命令（laya 最优配置）：
-```bash
-JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
-  python process_test_set.py --skip-chat --out test/results/原始51_laya强制选择.xlsx --log test/results/原始51_laya强制选择_日志.txt
-python compare_results.py test/results/原始51_laya强制选择.xlsx
-```
-
-**性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/results/原始51_*_性能.json`）：
-
-| 指标（同机 51 条） | 旧管线（边车→平台） | openjev-seq | **laya forced（v3 重跑）** |
-|---|---|---|---|
-| 延迟 p50 | 0.745s | 1.353s | **0.044s** |
-| 延迟 p95 | 1.424s | 3.913s | **0.050s** |
-| 吞吐 | ~68 条/分钟 | 38.8 条/分钟 | **1435 条/分钟** |
-| 加载 / 内存 | 远端服务 | 4.4s / 0.7GB | 3.98s / 3.0GB |
-| 每次调用成本 | 1400 prompt + 39 completion tokens | 本地机时 | 本地机时 |
-
-> 性能数字取自仓库内 `原始51_laya_性能.json`（v3 重跑，2026-09-24 19:07，git_commit `668ef0b`）。v1 首跑为 3.68s / 1425.1 条/分 / p95 0.052s，p50 两版同为 0.044s——v3 的三项工程修复基本不影响性能。上方准确率表为 **v1** 口径（对应 `原始51_laya强制选择.xlsx`）；v3 在 51 条上同步升到 F1 0.957（`原始51_laya强制选择v3.xlsx`），见下文「v1 → v3 的三个免微调工程修复」。
-
-**结论**：
-- **laya-multilingual（mmBERT-base，Apache-2.0）+ 领域候选过滤 + 强制选择组装 = 比旧管线快 17 倍、人名 F1 0.936**，零样本、纯本地、零 token 成本。Jev 范式的性能主张（毫秒级、单前向）由 laya 在本地兑现
-- 剩余 4 行错误集中在：『小陈同学』边界切分（2 行，gold 要 小陈+身份同学）、否定句（2 行，『我不是陈总我叫陈部长』类）——属微调可解范围（官方 Kaggle 2×T4 微调 notebook 现成）
-- **laya 已知怪癖与本工程对策**（模型卡 Honest Limits 全部实测复现）：
-  - noul 弱信号/选项顺序敏感（同一问题交换 A/B 位置分数 0.82↔0.44）→ 弃用独立 noul 扇出，改**迭代强制选择**（候选在同一 softmax 内竞争）
-  - 单候选退化成二选一时随机倒向『没有人物』→ 单候选走 noul 阈值门
-  - 身份高置信度幻觉（坐主驾→司机 0.97）→ **文本证据门控**：身份词必须在原文中与人名相邻出现，否则抑制（身份准确率 0.182→0.955）
-  - 选项位置偏差 → 『未提及』放选项表第一位
-- open-jev（英文 DeBERTa）零样本中文不可用（品牌名/方位词全高分误报）；其 512-token 上下文导致延迟随问题数严格线性（42ms/问），批量前向在 MPS 上反而慢 33%（批内 padding），默认串行
-- ⚠️ 旧代码兼容性发现（旧提取函数已随 Jev 重构合并从 main 移除，以下为历史注记）：旧提取函数用 `hasattr(response, '__iter__')` 判断流式，新版 openai SDK 的 ChatCompletion（pydantic v2）可迭代 → 非流式响应被误判、解析必失败（延迟测量不受影响）。如需在 main 上修复，改用 `if EXTRACTION_STREAM:` 分支即可
-- 官方 Jev API（typesafe 后端）仍待 key，拿到后可补测第四列
-
-### 扩充集评测（510 条，2026-09-24）
-
-`expand_test_set.py`（seed=42，构造即标注）把测试集扩到 10 倍：原始 51 条 + 460 条模板生成，覆盖 10 个模板族（品牌位置/多人/否定句/无人物负例含困难负例/拉丁名/身份明示/同学边界等）。
-
-| 指标（510 条） | laya 零样本 v1 | **laya 零样本 v3（修复后）** | qwen3.8-flash-aliyun（关思考） |
-|---|---|---|---|
-| 人名 P / R / F1 | 0.885/0.719/0.793 | 0.924/0.908/**0.916** | **0.964/0.964/0.964** |
-| 位置 / 身份准确率 | 0.779 / 0.828 | 0.755 / 0.796 | **0.988 / 0.979** |
-| 行级全对 | 368/510 (72.2%) | **444/510 (87.1%)** | **491/510 (96.3%)** |
-
-按模板族（行级全对率）：
-
-| 族 | laya v1 | laya v3 | flash |
-|---|---|---|---|
-| 多人 | 0.38 | **0.85** | 1.00 |
-| 否定句 | 0.42 | **1.00** | 1.00 |
-| 品牌位置 / 无品牌位置 | 0.81 / 0.70 | 0.84 / 0.92 | **1.00 / 1.00** |
-| 无人物负例 / 身份明示 / 自我介绍 | 0.81 / 1.00 / 0.95 | 0.78 / 1.00 / 0.95 | **1.00 / 1.00 / 1.00** |
-| 同学边界 / 称谓无品牌 | 0.56 / 0.55 | 0.56 / 0.95 | **1.00 / 1.00** |
-| 拉丁名 | **0.72** | **0.72** | 0.24 |
-
-**v1 → v3 的三个免微调工程修复**（原始 51 条同步受益：F1 0.936 → 0.957，性能不变 p50 44ms）：
-1. **否定门控**（否定句 0.42→1.00）：『不是/别叫我/不叫』引导的候选在代码层剔除，不进模型——laya 零样本的否定判断是纯噪声（被否定 0.71 vs 未否定 0.79，任何阈值切不开），而否定句式是确定性表层句法
-2. **锚点回退 + 增量扫描**（多人 0.38→0.85）：实测 laya 的强制选择对『小X』类名字系统性失效（三人句第 2 轮 小李 0.06，同上下文 noul 0.89）。改为：第 1 轮强制选择定锚点；『没有人物』胜出但置信度 <0.7（含糊）时回退普通 noul 扫描（多人句漏判实测 0.62 vs 真负例 0.77-0.86，据此门控）；锚点确认后对剩余候选做带上下文的 noul 扫描
-3. **称谓碎片清理**：『姓+多字称谓首字』的 2 字片段（陈部 ⊂ 陈部长）剔除——碎片会稀释强制选择的 softmax（实测 [陈部, 陈部长] 时倒向『没有人物』）。只认真正称谓碎片（老/部/经/医/师 开头）：宽泛剔除会把 江湖/宋城 类困难负例削成单候选、落进 noul 路径产生误报（江湖救 noul=0.73，强制选择能正确以 0.86 拒绝）
-
-结论：
-- **flash（关思考）仍是准确率上限**（F1 0.964），laya 修复后差距缩到 5 个点（0.916），但 laya **单条 ~44ms、零成本、纯本地**（flash 为远端 LLM 调用，车机/离线场景不可用；laya 目前仅在 Mac 实测，车机/嵌入式部署为未来工作）
-- laya 剩余弱点：同学边界 0.56（小陈同学 vs 陈同学切分）、拉丁名 0.72（称谓剥离约定）、困难负例 12 FP（姓氏开头的普通词：马上/高架/张家口——零样本判别上限，微调可解）
-- 拉丁名族 laya 反超 flash（0.72 vs 0.24）：代码级片段提取天然剥离称谓，LLM 把『bob小姐』整体当名字
-- Qwen3.8 系（max/flash）默认开思考；`enable_thinking:false` 平台可透传（`eval_llm_baseline.py --no-thinking`），关思考后 flash 单条 p50 1.29s，开思考的 max 单条 ≥7s（511 条跑不完，已弃）
-
-复现：
-```bash
-python expand_test_set.py                                   # 生成 511 条 + gold + meta
-python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边车
-python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
-```
-
-> 注：`eval_llm_baseline.py` / `bench_baseline_llm.py` 加载的旧提取函数 `extract_entities_with_model` 已随 Jev 重构（668ef0b）从 main 移除，两脚本的 ref 已钉到重构前的 `7bae5bb`（commit e89252b），可直接复跑。
-
-### 对抗子集评测（分布外，2026-10-19）
-
-510 条扩充集是**模板构造**的（人名全从 `SURNAMES` 表抽、否定句式与 `_is_negated` 的 `NEGATION_CUES` 同源），属**分布内**评测。为暴露召回天花板与否定泛化缺口，另建 60 条对抗子集（`eval_adversarial.py`，三族各 20 条，全部针对代码盲区设计）：
-
-| 族 | 设计意图 | 人名级结果 | F1 |
-|---|---|---|---|
-| 表外姓 | 姓氏不在 `SURNAME_CHARS`（翦/仝/冼/佟…）、外号非「小X」（阿宝/大壮） | **20/20 全漏召**（FN=20） | **0.000** |
-| 真实否定 | 否定线索不在 `NEGATION_CUES` 或置于名字后（别把我当成X / X不是我 / 并非X / 没来） | **15/20 误报**（FP=15） | **0.000** |
-| ASR噪声（对照） | 口语填充/重复/语气尾词，人名仍在表内 | 18 TP / 3 FP / 2 FN | 0.878 |
-| **合计** | — | — | **0.474** |
-
-**结论（诚实边界）**：分布内 0.916 **不是真实座舱语音的分数**，而是模板分布内的分数。两个盲区是**确定性代码边界**、非模型能力问题：
-
-- **表外姓 = 硬召回天花板**：`surname` 过滤只为「姓开头 / 小X / 复姓 / 拉丁词」生成候选，表外姓根本进不了候选集 → 必然漏召。扩姓氏表或改 `span` 模式可解，但会重新引入品牌/方位词误报（这正是当初选 surname 过滤的代价）。
-- **真实否定 = 门控泛化缺口**：`_is_negated` 只匹配名字前 3 字内的 6 个固定线索；「别把我当成 / X不是我 / 并非 / 没来」全绕过。但 20 条里仍有 5 条被 laya 模型自身正确拒绝（「缺席 / 不来了」类），说明模型有部分否定判断力，是代码门控没覆盖全。
-- **ASR 噪声鲁棒（0.878）**：口语填充/重复不破坏表内人名提取 → 瓶颈在**词表覆盖**，不在模型对真实语音的适应力。
-
-复现：`.venv/bin/python eval_adversarial.py`（产物 `test/对抗集.xlsx` + `test/对抗集_gold.xlsx` + `test/results/对抗集_laya_v3.xlsx`）。
-
-## 仓库结构
-
-```
-├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
-├── docs/index.html         # 线上展示页（预录回放版，GitHub Pages 承载）
-├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
-├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
-├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）
-├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
-│                           #   fanout/forced 两种组装模式，姓氏候选过滤，身份证据门控）
-├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
-├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
-├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
-├── bench_baseline_llm.py   # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
-├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
-└── test/
-    ├── 测试集.xlsx                          # 原始 51 条用例
-    ├── 测试集_结果.xlsx                     # 原始 gold（10.23 旧管线全量通过输出）
-    ├── 测试集_扩充10x.xlsx                  # 扩充集 511 条（生成）
-    ├── 测试集_扩充10x_gold.xlsx             # 扩充集 gold（构造即标注）
-    ├── 测试集_扩充10x_meta.json             # 话语 → 模板族映射
-    └── results/                             # 全部实验产物，文件名 = 数据集_模型/配置
-        ├── 原始51_openjev.xlsx              # open-jev 扇出（F1 0.342）
-        ├── 原始51_laya扇出.xlsx             # laya 扇出（F1 0.291，被强制选择取代）
-        ├── 原始51_laya强制选择.xlsx         # laya 强制选择 v1（F1 0.936）
-        ├── 原始51_laya强制选择v3.xlsx       # laya 强制选择 v3（F1 0.957）
-        ├── 扩充510_laya强制选择.xlsx        # laya 强制选择 v1（F1 0.793）
-        ├── 扩充510_laya强制选择v2.xlsx      # laya 强制选择 v2（F1 0.846，中间迭代）
-        ├── 扩充510_laya强制选择v3.xlsx      # laya 强制选择 v3（F1 0.916）
-        ├── 扩充510_qwen3.8-flash关思考.xlsx # flash 关思考（F1 0.964）
-        ├── 原始51_openjev_性能.json         # open-jev 延迟基准（p50 1.353s）
-        ├── 原始51_laya_性能.json            # laya 延迟基准（p50 0.044s）
-        ├── 原始51_omni7b_性能.json          # 旧管线 omni-7b 延迟（p50 0.745s）
-        └── *_日志.txt                       # 各轮跑批日志
-```
-
-## 环境准备
-
-1. 安装依赖:
-```bash
-pip install -r requirements.txt
-```
-
-2. 配置API密钥:
-   编辑`.env`文件，将`your-api-key-here`替换为您的实际API密钥:
-   ```
-   OPENAI_API_KEY=your-actual-api-key
-   ```
-
-## 使用本地部署的模型服务
-
-如果您部署了与OpenAI API兼容的本地服务，可以通过配置`.env`文件中的`OPENAI_BASE_URL`来使用:
-
-```
-OPENAI_API_KEY=your-api-key-here
-OPENAI_BASE_URL=http://localhost:13984
-```
-
-程序会自动使用您指定的URL作为模型服务的地址。
-
-如果您的本地服务使用不同的模型名称，可以通过以下配置指定模型名称：
-
-```
-OPENAI_API_KEY=your-api-key-here
-OPENAI_BASE_URL=http://localhost:13984
-OPENAI_DEFAULT_MODEL=your-local-model-name
-OPENAI_EXTRACTION_MODEL=your-local-model-name
-```
-
-## 使用方法
-
-### 交互式对话模式
-
-运行脚本:
-```bash
-python qwen_chat.py
-```
-
-根据提示输入车内人员情况描述，系统会自动分析并提取相关信息。
-
-### 批量测试集处理模式
-
-运行脚本:
-```bash
-python process_test_set.py
-```
-
-该脚本会读取`test/测试集.xlsx`文件中的测试用例，逐条处理并生成以下输出：
-1. `test/测试集_结果.xlsx` - 包含详细处理结果的Excel文件
-2. `test/处理日志.txt` - 完整的处理日志文件
-
-可选参数：
-```bash
-python process_test_set.py --skip-chat --out test/results/原始51_某配置.xlsx --log test/results/原始51_某配置_日志.txt
-```
-- `--skip-chat`：跳过对话模型调用，只跑 Jev 信息提取（无需本地 LLM 服务）
-- `--out PATH`：指定结果输出路径，避免覆盖旧的对照结果
-- `--log PATH`：指定日志输出路径（默认会覆盖 `test/处理日志.txt`）
-
-### Jev 提取自检（离线，无需任何 API）
+1. 安装依赖：
 
 ```bash
-python jev_extract.py --selftest
+pip install -r requirements.txt   # 含 laya / torch
 ```
 
-检查候选生成层是否覆盖测试集 gold 标注中的全部人名（当前：47/47 全覆盖）。
+2. 配置对话模型 `.env`（信息提取默认走本地 laya，无需任何 key）：
+
+```
+OPENAI_API_KEY=your-api-key
+OPENAI_BASE_URL=http://localhost:13984          # 可选：本地 OpenAI 兼容服务
+OPENAI_DEFAULT_MODEL=your-local-model-name      # 可选：本地服务的模型名
+OPENAI_EXTRACTION_MODEL=your-local-model-name   # 可选
+```
+
+3. 运行：
 
 ```bash
-JEV_BACKEND=dryrun python jev_extract.py
+python qwen_chat.py         # 交互式：输入车内人员描述 → 对话回答 + 结构化提取
+python process_test_set.py  # 批量评测 test/测试集.xlsx（--skip-chat 只跑提取，无需 LLM 服务；--out/--log 指定产物路径）
+python jev_extract.py --selftest             # 提取自检（离线）：候选生成层覆盖 gold 全部人名（47/47）
+JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构，不调用模型
 ```
-
-打印一条示例输入将要发送给 Jev 的全部问题结构，不调用模型。
-
-## 输出格式
-
-输出分为两个部分:
-1. Qwen模型的完整回答
-2. 结构化的车内人员分布信息（人员与位置关联显示）
 
 ## 示例
 
@@ -348,3 +85,30 @@ JEV_BACKEND=dryrun python jev_extract.py
    3. 小宝（孩子） 位于 后排
 ============================================================
 ```
+
+## 仓库结构
+
+```
+├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
+├── docs/
+│   ├── index.html          # 线上展示页（预录回放版，GitHub Pages 承载）
+│   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置）
+│   └── evaluation.md       # 完整评测（51/510 条、对抗子集、复现命令、产物清单）
+├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
+│                           #   fanout/forced 两种组装模式，姓氏候选过滤，身份证据门控）
+├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
+├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
+├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）
+├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
+├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
+├── eval_adversarial.py     # 对抗子集生成与评测（60 条分布外样本，三族各 20）
+├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
+├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
+├── bench_baseline_llm.py   # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
+└── test/                   # 测试集 + gold + results/（全部实验产物，清单见评测文档）
+```
+
+## 文档
+
+- 🏗 **[信息提取架构（Jev）](docs/architecture.md)**——类型化决策三原语、四步提取管线、与旧管线对比、四后端配置
+- 📊 **[评测结果与基准](docs/evaluation.md)**——51 条实测、510 条扩充集、对抗子集（诚实边界）、laya 怪癖与工程对策、复现命令与产物清单
