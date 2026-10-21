@@ -5,4 +5,5 @@ openpyxl>=3.0.0
 requests>=2.28.0
 
 # Jev/laya 类型化决策后端 + demo/（会自动带入 torch、transformers）
-laya>=0.3.17
+# 严格 pin 保证复现：2026-10-21 0.3.17→0.4.12 回归，51 条 + 510 条行级逐位一致（F1 0.957/0.916）
+laya==0.4.12
