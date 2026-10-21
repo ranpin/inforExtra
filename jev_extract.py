@@ -29,6 +29,10 @@ JEV_MODEL = os.getenv("JEV_MODEL", "jev-latest")
 OPEN_JEV_MODEL = os.getenv("OPEN_JEV_MODEL", "com-kotobalabs/open-jev-deberta-v3-large")
 LAYA_MODEL = os.getenv("LAYA_MODEL", "convaiinnovations/laya")
 LAYA_SUBFOLDER = os.getenv("LAYA_SUBFOLDER", "multilingual")  # 中文必须走 multilingual
+# 温度校准 opt-in（fit_calibration.py 产物的路径）。默认不加载：2026-10-21
+# 510 条域内实测拟合撞钳位（想要 T=7.5~6833，钳到 5.0）、域内 ECE 0.50→0.37 仍高，
+# 且管线问题全为 choice 型 → 统一温度是单调变换，阈值重调后决策等价（详见 docs/evaluation.md）
+LAYA_CALIBRATION = os.getenv("JEV_LAYA_CALIBRATION", "")
 
 IS_PERSON_THRESHOLD = float(os.getenv("JEV_IS_PERSON_THRESHOLD", "0.5"))
 NEGATED_THRESHOLD = float(os.getenv("JEV_NEGATED_THRESHOLD", "0.5"))
@@ -535,7 +539,8 @@ class LayaBackend:
 
     def __init__(self):
         import laya
-        self.agent = laya.load(LAYA_MODEL, subfolder=LAYA_SUBFOLDER)
+        self.agent = laya.load(LAYA_MODEL, subfolder=LAYA_SUBFOLDER,
+                               calibration=LAYA_CALIBRATION or None)
         self.last_chunks = 1  # 单次前向，兼容 PERF 统计
 
     def ask(self, state, questions):
@@ -706,13 +711,16 @@ def _extract_forced(user_input, backend, cands):
     n_q1 = 1
     if anchor is None and not fallback_winners:
         PERF.update({"t_round1": t_round1, "t_round2": 0.0,
-                     "n_questions_r1": n_q1, "n_questions_r2": 0})
+                     "n_questions_r1": n_q1, "n_questions_r2": 0,
+                     "winners": []})
         return {"persons": []}
 
     if fallback_winners:
         winners = fallback_winners[:FORCED_MAX_PERSONS]
+        winner_paths = ["fallback"] * len(winners)
     else:
         winners = [anchor]
+        winner_paths = ["single_noul" if len(cands) == 1 else "forced"]
 
         # --- 第 2 轮：增量 noul 扫描剩余候选 ---
         a_cand = anchor[0]
@@ -734,11 +742,13 @@ def _extract_forced(user_input, backend, cands):
                 for item in passed:
                     if not any(overlaps(item[0], k[0]) for k in winners):
                         winners.append(item)
+                        winner_paths.append("scan")
             except Exception as e:  # noqa: BLE001
                 print(f"Jev 增量扫描失败: {e}")
             t_round2 = time.perf_counter() - t0
             n_q2 = len(rest)
         winners = winners[:FORCED_MAX_PERSONS]
+        winner_paths = winner_paths[:FORCED_MAX_PERSONS]
 
     # --- v4 称谓后缀拆分：陈同学 → 小陈 + 身份证据 同学（仅当原文存在
     # 止于称谓起点的重叠候选时触发；赢家已是小陈则只取后缀作身份证据）---
@@ -748,6 +758,9 @@ def _extract_forced(user_input, backend, cands):
         if repl is None:
             suf = _following_title(user_input, c)
         split_winners.append((repl or c, p, suf))
+    # 赢家分数/路径埋点（规则4阈值调优与 bench 诊断用）
+    PERF["winners"] = [(c["text"], p, path)
+                       for (c, p, _suf), path in zip(split_winners, winner_paths)]
 
     # --- 属性轮：每个赢家取 location/identity ---
     persons = []
@@ -797,7 +810,7 @@ def extract_entities(user_input):
     t_start = time.perf_counter()
     PERF.update({"n_candidates": 0, "n_questions_r1": 0, "n_chunks_r1": 0,
                  "n_questions_r2": 0, "t_candidates": 0.0, "t_round1": 0.0,
-                 "t_round2": 0.0, "t_total": 0.0})
+                 "t_round2": 0.0, "t_total": 0.0, "winners": []})
     try:
         backend = get_backend()
     except Exception as e:  # noqa: BLE001

@@ -208,3 +208,6 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# laya 温度校准拟合产物（fit_calibration.py 生成，可用 JEV_LAYA_CALIBRATION 显式加载）
+laya_calibration.json
