@@ -239,7 +239,19 @@ def _identity_supported(text, name, identity):
 # 否定线索：出现在人名前 3 字窗口内即视为该次出现被否定。
 # laya 零样本的否定判断是纯噪声（实测被否定 0.71 vs 未否定 0.79，
 # 任何阈值切不开），而『不是X/别叫我X』是确定性表层句法，代码层解决。
-NEGATION_CUES = ("不是", "不叫", "别叫", "别说", "别喊", "不姓")
+# v4 泛化：并非（书面否定）/当成（误认『把我当成X』）/算不上/哪里是（反问否定）/
+# 别记成（纠正）。窗口保持 3 字——扩到 4 会误杀『不是啊，小李在主驾』类
+# 话语否定+真实人名句式，故『我没说我是X』（线索与人名字隔 2 字）为已知留白。
+NEGATION_CUES = ("不是", "不叫", "别叫", "别说", "别喊", "不姓",
+                 "并非", "当成", "算不上", "哪里是", "别记成")
+
+# v4 后向缺席/纠正线索：线索出现在人名之后（『陈总不是我』『周老师没来』
+# 『何医生今天休息，没来』），只关联最近的前置候选（距离 ≤ ABSENCE_MAX_GAP，
+# 可跨逗号），避免『周老师来了，小李没来』类多人句误杀前者。
+# 全部是人物级缺席/纠正谓词；位置否定只收完整的『不在车上/没上车』而不收
+# 『不在』，防止『小李在主驾不在副驾』类位置纠正句误杀人物。
+ABSENCE_CUES = ("不在车上", "没上车", "没来", "不来", "缺席", "不是我", "是别人")
+ABSENCE_MAX_GAP = 8
 
 
 def _is_negated(text, name):
@@ -260,6 +272,32 @@ def _is_negated(text, name):
             negated += 1
         start = idx + 1
     return total > 0 and negated == total
+
+
+def _backward_negated(text, cands):
+    """后向缺席/纠正线索命中的候选 id 集合。
+
+    每个线索出现只否定距离最近的前置候选（≤ ABSENCE_MAX_GAP）及其
+    重叠候选——『赵总并不在车上』会同时生成 赵总/赵总并，后者离线索
+    更近，须连带否定重叠的真正人物候选；而『周老师来了，小李没来』的
+    两个人物候选互不重叠，只杀最近的小李。
+    """
+    negated = set()
+    for cue in ABSENCE_CUES:
+        start = 0
+        while True:
+            q = text.find(cue, start)
+            if q < 0:
+                break
+            near = [c for c in cands
+                    if 0 <= q - c["end"] <= ABSENCE_MAX_GAP]
+            if near:
+                nearest = min(near, key=lambda c: q - c["end"])
+                for c in near:
+                    if overlaps(c, nearest):
+                        negated.add(c["id"])
+            start = q + 1
+    return negated
 
 
 def group_overlapping(passing):
@@ -710,6 +748,9 @@ def extract_entities(user_input):
     cands = generate_candidates(user_input)
     # 否定门控：被『不是/别叫我』引导的候选在代码层剔除，不进模型
     cands = [c for c in cands if not _is_negated(user_input, c["text"])]
+    # v4 后向门控：人名后被缺席/纠正线索命中（『陈总不是我』『周老师没来』）的候选剔除
+    back_neg = _backward_negated(user_input, cands)
+    cands = [c for c in cands if c["id"] not in back_neg]
     PERF["t_candidates"] = time.perf_counter() - t0
     PERF["n_candidates"] = len(cands)
     if not cands:
