@@ -35,14 +35,14 @@ Jev 不能生成文本，因此人名这类开放词表值由代码先给出候�
 
 ## 提取管线（jev_extract.py）
 
-1. **候选生成**（纯代码）：枚举输入中所有 2–4 字中文片段和拉丁词，过滤含功能词的片段
+1. **候选生成与否定门控**（纯代码）：枚举输入中所有 2–4 字中文片段和拉丁词，过滤含功能词/语气词的片段；surname 过滤模式只保留姓氏开头（含生僻姓）/ 小X / 阿X / 复姓 /「单字+称谓」（X老师），并做称谓碎片、叠字碎片、裸称谓（bob小姐 的 小姐）两遍清理；被否定线索引导的候选（前向 不是/并非/当成… 3 字窗口 + 后向 没来/不是我/不在车上… 就近关联）在代码层剔除——laya 零样本否定判断是噪声，而否定句式是确定性表层句法
 2. **第一轮提问**（一次请求，投机扇出）：对每个候选并行问 4 个问题——
    - `Noul` 『X』是这句话中提到的某个人物的名字或称呼
    - `Noul` 这句话否定或纠正了『X』这个称呼（处理"我不是陈总"类用例）
    - `Choice` 『X』坐在车内哪个位置（闭集：主驾/副驾/后排左边/…/未提及）
    - `Choice` 『X』的身份或称谓（半闭集：同事/同学/老师/…/未提及）
 3. **第二轮消歧**（仅在需要时）：互相重叠的候选（如"小陈/陈同学/小陈同学"）用一次 `Choice` 让 Jev 选出最准确的称呼
-4. **代码组装**：按概率阈值过滤、去重，输出与旧版一致的 `{"persons": [{"name", "identity", "location"}]}`
+4. **代码组装**：按概率阈值过滤、去重；称谓后缀拆分（陈同学 → 小陈 + 身份同学，仅当原文存在止于称谓起点的重叠候选时触发）与身份后缀抑制（陈部长 + 部长 → 身份空）；位置/身份文本证据门控（原文无任何位置词 / 身份词未在人名旁出现时置空——防幻觉）；输出与旧版一致的 `{"persons": [{"name", "identity", "location"}]}`
 
 相比旧版「约 2000 token 的巨型 prompt + LLM 生成 JSON + 字符串切割解析」：
 - 结构化输出错误率按构造为 0（不存在 JSON 解析失败）
@@ -60,7 +60,7 @@ Jev 不能生成文本，因此人名这类开放词表值由代码先给出候�
 | **输入成本** | 每次 prefill ~2000 token 巨型 prompt（指令/schema/少样本示例） | 答案空间请求时定义，输入只有话语 + 紧凑问题 |
 | **部署形态** | 远端边车→平台（网络 + 排队） | 纯本地，无网络往返 |
 
-最大头是第一层：**自回归生成是顺序的**（输出 N 个 token ≈ N 次前向），而判别一次前向就出全部结果。实测 p50 0.745s → 0.044s（≈17×，详见[评测文档](evaluation.md)）。
+最大头是第一层：**自回归生成是顺序的**（输出 N 个 token ≈ N 次前向），而判别一次前向就出全部结果。实测 p50 0.745s → 0.043s（≈17×，详见[评测文档](evaluation.md)）。
 
 这正是 TypeSafe 把它叫 "System One" 的原因——借卡尼曼的比喻：系统 1（快、判别、模式匹配）vs 系统 2（慢、审议、生成）。车载提取这类高频小判定只需系统 1，不必付出系统 2 的生成代价。
 
@@ -76,6 +76,7 @@ LAYA_MODEL=convaiinnovations/laya          # 本地 Laya（推荐，多语言）
 LAYA_SUBFOLDER=multilingual                # 中文必须走 multilingual
 JEV_CANDIDATE_FILTER=surname               # laya 推荐：姓氏候选过滤
 JEV_ASSEMBLY=forced                        # laya 推荐：迭代强制选择组装
+JEV_LAYA_CALIBRATION=                      # 可选：温度校准 JSON 路径（默认不加载，调查结论见 TODO 节）
 OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（仅英文）
 ```
 
@@ -94,14 +95,15 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（�
 - **Laya 家族**：只有 3 个 checkpoint——`laya`（ModernBERT-large 421M，纯英文）、`laya-multilingual`（mmBERT-base 322M，唯一多语言/中文可用）、`laya-typed-decisions`（421M 微调、通用基准 0.766 但纯英文）。没有更新/更大的多语言变体。
 - **新出现的同类模型全部不可用于中文**：`rony/gemma3-270m-typed-decisions`（270M、个人实验级、0 likes、实际仅英文）、`MSGEncrypted/ocf-typed-decisions-mbert-base`（mBERT、中文未验证、个人上传）、`fastino/GLiNER2.5-Decide`（340M、是**分类器**而非类型化决策、且仅英文、厂商自测基准）。都是英文 only / 中文未验证 / 个人原型级，不构成替代。
 - **官方 Jev API**：闭源远程付费（$0.042/1M tokens），高基数选项 + 校准比 laya 强但慢约 7.8×——不符合本项目「纯本地、零成本、车机/离线」约束。
-- **⚠️ 诚实定位**：laya-multilingual **在通用 typed-decisions 基准上零样本近乎随机（0.342）**，模型卡明说「能力来自微调」。jevCabin 能做到 F1 0.916 **完全靠领域工程**（姓氏过滤 + 强制选择 + 证据/否定门控），不是模型通用能力——这正是本项目的核心贡献，也与对抗子集 0.474（「工程盲区」）互相印证。
+- **⚠️ 诚实定位**：laya-multilingual **在通用 typed-decisions 基准上零样本近乎随机（0.342）**，模型卡明说「能力来自微调」。jevCabin 能做到 F1 0.944 **完全靠领域工程**（姓氏过滤 + 强制选择 + 证据/否定门控 + v4 规则优化），不是模型通用能力——这正是本项目的核心贡献；对抗子集 0.474 → 0.907（v4 修复后）进一步印证瓶颈在代码边界而非模型。
 - **最有价值的新发现——端侧变体**：社区已把 Laya 移植到多种端侧运行时——`litert-community/Laya-Multilingual-LiteRT`（Google LiteRT）、`AXERA-TECH/Laya`（爱芯元智边缘芯片），以及 GGUF / ONNX / CoreML / MXFP8 / MXFP4 / laya-browser。这为本项目「车机/嵌入式部署为未来工作」提供了现成路径（不必自己从头量化）。
 
 ## 已知可优化项（laya 侧，TODO）
 
 模型卡记录的两个 laya 固有坑，与本项目管线直接相关，值得后续处理：
 
-1. **温度重校准**：laya-multilingual 出厂过自信，按 (问题类型, 选项数) 做温度校准后 ECE 从 0.314 降到 0.106。本项目现直接用原始 confidence 门控（如「置信度 <0.7 含糊回退」），校准后这些阈值会更可靠，可能直接提升含糊判定的准确率。
-2. **noul 标签跟随 bug（laya issue #156）**：noul 可能跟随 `false:`/`true:` 选项字面而非 state，官方 workaround 是改用「两选项 choice + 中性 key」。本项目 v3 的「单候选 noul 阈值门」和「锚点回退 noul 扫描」都用到 noul，值得核查是否中招、必要时换成两选项 choice 写法。
+1. **温度重校准——2026-10-21 已实测，关闭（不接入管线）**：`fit_calibration.py` 在 510 条域内集上收集 6797 条 logits 记录拟合——域内 ECE 0.50（严重过自信），拟合撞钳位（choice 型想要 T=7.5、choice:2 桶想要 T=6833，均被钳到 laya 上限 5.0），校准后 holdout ECE 0.37 仍高；laya 官方 0.314→0.106 不迁移到中文座舱域。**关键结论**：管线问题全为 choice 型，统一温度是单调变换——阈值重调后决策等价，零收益；降低分桶样本下限则 choice:11+ 被位置/身份问题（k=12/15）混入污染、温度不可信。`JEV_LAYA_CALIBRATION` 保留 opt-in 加载路径，默认不加载。
+2. **noul 标签跟随 bug（laya issue #156）——workaround 已就位**：`LayaBackend` 已把 noul 问题统一改写为「A/B 中性键两选项 choice」（正是官方 workaround），P(A) 映射回 noul 概率，管线阈值不受影响。
+3. **剩余零样本上限（v4 后）**：困难负例 FP（马上 noul 0.984 与真实人物不可区分）、位置左右混淆与多人绑定（位置准确率 0.799 的瓶颈）——均属 laya 零样本判别上限，仅微调可解。
 
 （微调 laya-multilingual 是更高杠杆的路径——微调版 laya-typed-decisions 通用基准 0.766 vs 零样本 0.342——但项目定位是零样本 + 纯工程，故仅备注、不做。）

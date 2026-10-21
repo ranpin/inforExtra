@@ -134,6 +134,7 @@ def main():
                                          capture_output=True, text=True).stdout.strip(),
             "model": model_name,
             "candidate_filter": jev_extract.CANDIDATE_FILTER,
+            "assembly": jev_extract.ASSEMBLY_MODE,
             "warmup": WARMUP,
             "rounds": ROUNDS,
         },

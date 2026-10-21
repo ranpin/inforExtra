@@ -1,12 +1,15 @@
-"""对抗子集评测：测 laya v3 管线在「分布外」的召回天花板与否定泛化。
+"""对抗子集评测：测 laya 管线在「分布外」的召回天花板与否定泛化。
 
 三族各 ~20 条，全部针对 jev_extract 的已知代码盲区设计：
   族1 表外姓   —— 姓氏不在 SURNAME_CHARS / 外号非「小X」，surname 过滤生成不出候选 → 预期漏召(FN)
   族2 真实否定 —— 否定线索不在 NEGATION_CUES(不是/不叫/别叫/别说/别喊/不姓) 或置于名字之后 → 预期误报(FP)
   族3 ASR噪声  —— 口语填充词/重复/语气尾词，人名仍在 → 预期基本保持（对照组）
 
+v4 规则优化（2026-10-21）后：族1 F1 0.824（生僻姓/阿X/称谓后缀锚点修复，
+余 6FN 为设计内排除）、族2 FP 15→1、族3 1.000，合计 F1 0.474→0.907。
+
 gold 由构造时确定（构造即标注）。指标 = 人名级 P/R/F1（与主评测同口径）。
-产物：test/对抗集.xlsx（输入）/ test/对抗集_gold.xlsx（gold）/ test/results/对抗集_laya_v3.xlsx（预测）
+产物：test/对抗集.xlsx（输入）/ test/对抗集_gold.xlsx（gold）/ test/results/对抗集_laya_v4.xlsx（预测）
 用法：.venv/bin/python eval_adversarial.py
 """
 import os
@@ -121,7 +124,7 @@ def main():
 
     gp, gr, gf = prf(gtp, gfp, gfn)
     print("\n" + "=" * 62)
-    print("对抗子集评测（laya v3 最优配置，人名级 P/R/F1）")
+    print("对抗子集评测（laya 最优配置，人名级 P/R/F1）")
     print("=" * 62)
     print(f"{'族':<10}{'条数':>5}{'P':>8}{'R':>8}{'F1':>8}{'TP':>5}{'FP':>5}{'FN':>5}")
     for fam, n, p, rr, f, tp, fp, fn in summary:
@@ -129,7 +132,7 @@ def main():
     print("-" * 62)
     print(f"{'合计':<10}{sum(s[1] for s in summary):>5}{gp:>8.3f}{gr:>8.3f}{gf:>8.3f}{gtp:>5}{gfp:>5}{gfn:>5}")
     print("=" * 62)
-    print("对照：分布内 510 条 v3 人名 F1 = 0.916")
+    print("对照：分布内 510 条 v4 人名 F1 = 0.944")
 
     # 产物入库
     os.makedirs("test/results", exist_ok=True)
@@ -148,8 +151,8 @@ def main():
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "预测"
     ws.append(["族", "用户输入", "gold", "预测"])
     for row in all_rows: ws.append(list(row))
-    wb.save("test/results/对抗集_laya_v3.xlsx")
-    print("\n产物已写入 test/对抗集.xlsx, test/对抗集_gold.xlsx, test/results/对抗集_laya_v3.xlsx")
+    wb.save("test/results/对抗集_laya_v4.xlsx")
+    print("\n产物已写入 test/对抗集.xlsx, test/对抗集_gold.xlsx, test/results/对抗集_laya_v4.xlsx")
 
 
 if __name__ == "__main__":

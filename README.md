@@ -10,11 +10,11 @@
 
 零样本、纯本地、零 token 成本（Apple M4 Pro / MPS）：
 
-- **人名 F1 0.916**（510 条扩充集，laya v3；原始 51 条 v1 0.936 → v3 0.957）
-- **单条延迟 p50 0.044s、吞吐 1435 条/分钟**——比旧管线（p50 0.745s）**快 17 倍**
-- **诚实边界**：分布外对抗子集（表外姓/真实否定/ASR 噪声）F1 0.474——瓶颈是确定性代码边界（词表覆盖 + 门控规则），非模型能力
+- **人名 F1 0.944**（510 条扩充集，laya v4；原始 51 条 v4 F1 1.000、行级 50/50）
+- **单条延迟 p50 0.043s、吞吐 1427 条/分钟**——比旧管线（p50 0.745s）**快 17 倍**
+- **诚实边界**：分布外对抗子集（表外姓/真实否定/ASR 噪声）F1 0.474 → v4 规则修复后 **0.907**；余困难负例 FP 属 laya 零样本判别上限（微调可解）
 
-📊 完整评测（51 条 / 510 条 / 对抗子集、按模板族分解、v1→v3 工程修复、全部复现命令）→ **[docs/evaluation.md](docs/evaluation.md)**
+📊 完整评测（51 条 / 510 条 / 对抗子集、按模板族分解、v1→v4 工程修复、全部复现命令）→ **[docs/evaluation.md](docs/evaluation.md)**
 
 ## 功能特点
 
@@ -95,13 +95,14 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 │   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置）
 │   └── evaluation.md       # 完整评测（51/510 条、对抗子集、复现命令、产物清单）
 ├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
-│                           #   fanout/forced 两种组装模式，姓氏候选过滤，身份证据门控）
+│                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控）
 ├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
 ├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
 ├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）
 ├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
 ├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
 ├── eval_adversarial.py     # 对抗子集生成与评测（60 条分布外样本，三族各 20）
+├── fit_calibration.py      # laya 温度校准拟合（510 条域内；实测结论：决策中性，不接入管线）
 ├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
 ├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
 ├── bench_baseline_llm.py   # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
