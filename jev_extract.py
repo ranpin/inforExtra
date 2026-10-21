@@ -762,6 +762,13 @@ def _extract_forced(user_input, backend, cands):
     PERF["winners"] = [(c["text"], p, path)
                        for (c, p, _suf), path in zip(split_winners, winner_paths)]
 
+    # v4 位置文本证据门：原文没有任何位置词时，位置回答必是幻觉
+    # （困难负例 马上/高架 全部幻觉出位置；否定句/自我介绍 gold 位置为空也被幻觉）。
+    # 只验证「原文存在某个位置词」而非预测的具体选项词——gold 与问题措辞都允许
+    # 右后→右后座 类同义映射，严格验证会误杀此类正确行（510 实测 2 行）
+    loc_evidence = any(o in user_input for o in LOCATION_OPTIONS
+                       if o != NO_LOCATION)
+
     # --- 属性轮：每个赢家取 location/identity ---
     persons = []
     for c, _p, suf in split_winners:
@@ -781,6 +788,9 @@ def _extract_forced(user_input, backend, cands):
         t_round2 += time.perf_counter() - t0
         n_q2 += 2
         loc = _answer_value(attr, "loc", "choice") or ""
+        loc = "" if loc == NO_LOCATION else loc
+        if loc and not loc_evidence:
+            loc = ""
         ident = _answer_value(attr, "id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
         if not _identity_supported(user_input, c["text"], ident):
@@ -794,7 +804,7 @@ def _extract_forced(user_input, backend, cands):
         persons.append({
             "name": c["text"],
             "identity": ident,
-            "location": "" if loc == NO_LOCATION else loc,
+            "location": loc,
         })
     PERF.update({"t_round1": t_round1, "t_round2": t_round2,
                  "n_questions_r1": n_q1, "n_questions_r2": n_q2})
@@ -889,9 +899,14 @@ def extract_entities(user_input):
                 winners.append(max(cluster, key=lambda item: item[1]))
 
     winners.sort(key=lambda item: item[0]["start"])
+    loc_evidence = any(o in user_input for o in LOCATION_OPTIONS
+                       if o != NO_LOCATION)
     persons = []
     for c, _p in winners:
         loc = _answer_value(answers, f"c{c['id']}_loc", "choice") or ""
+        loc = "" if loc == NO_LOCATION else loc
+        if loc and not loc_evidence:
+            loc = ""
         ident = _answer_value(answers, f"c{c['id']}_id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
         if not _identity_supported(user_input, c["text"], ident):
@@ -902,7 +917,7 @@ def extract_entities(user_input):
         persons.append({
             "name": c["text"],
             "identity": ident,
-            "location": "" if loc == NO_LOCATION else loc,
+            "location": loc,
         })
     PERF["t_total"] = time.perf_counter() - t_start
     if os.getenv("JEV_PERF"):
