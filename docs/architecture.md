@@ -49,13 +49,28 @@ Jev 不能生成文本，因此人名这类开放词表值由代码先给出候�
 - 品牌名（日产/吉利）、方位词、人称代词的排除从「prompt 规则」变为「可测量的概率」
 - 每个判定带置信度，阈值可按场景调节（`JEV_IS_PERSON_THRESHOLD` 等）
 
+## 为什么比长 prompt 方案快得多
+
+一句话：**类型化决策把「生成」变成了「判别」**——旧管线让大模型把答案一个字一个字「写」出来，新管线让小模型一次性「读」出所有问题的概率。四层加速来源叠加：
+
+| 维度 | 旧管线（Qwen-2.5-Omni-7B） | Jev/Laya 类型化决策 |
+|---|---|---|
+| **输出方式** | 自回归生成：逐 token 写 JSON，每个 token 一次**顺序**前向、无法并行 | 单前向判别：非自回归 encoder，一次前向读入文本+全部问题，**同时**输出所有问题的校准概率（never generates text） |
+| **模型规模** | 7B（且多模态） | 322M（mmBERT-base），小约 22 倍 |
+| **输入成本** | 每次 prefill ~2000 token 巨型 prompt（指令/schema/少样本示例） | 答案空间请求时定义，输入只有话语 + 紧凑问题 |
+| **部署形态** | 远端边车→平台（网络 + 排队） | 纯本地，无网络往返 |
+
+最大头是第一层：**自回归生成是顺序的**（输出 N 个 token ≈ N 次前向），而判别一次前向就出全部结果。实测 p50 0.745s → 0.044s（≈17×，详见[评测文档](evaluation.md)）。
+
+这正是 TypeSafe 把它叫 "System One" 的原因——借卡尼曼的比喻：系统 1（快、判别、模式匹配）vs 系统 2（慢、审议、生成）。车载提取这类高频小判定只需系统 1，不必付出系统 2 的生成代价。
+
 ## 后端配置
 
 通过 `.env` 或环境变量选择后端（默认 `auto`：有 `TYPESAFE_API_KEY` 走官方 API，否则依次尝试本地 laya / open-jev）：
 
 ```
 JEV_BACKEND=auto            # auto | typesafe | laya | openjev | dryrun
-TYPESAFE_API_KEY=sk-...     # TypeSafe 官方 API（早期访问需 waitlist）
+TYPESAFE_API_KEY=sk-...     # TypeSafe 官方 API（闭源远程付费；现状见下文「模型选型现状」）
 JEV_MODEL=jev-latest        # 官方 API 模型版本（调过阈值后建议固定版本号）
 LAYA_MODEL=convaiinnovations/laya          # 本地 Laya（推荐，多语言）
 LAYA_SUBFOLDER=multilingual                # 中文必须走 multilingual
@@ -66,8 +81,27 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（�
 
 - **typesafe**：官方托管 API（`POST https://api.typesafe.ai/v1/systemone`），需要 `pip install requests`，key 从 console.typesafe.ai 获取
 - **laya**：本地 Laya（Convai Innovations，Apache-2.0，mmBERT-base 多语言，MPS/CPU 可跑），需要 `pip install laya`；中文实测最优配置为 `JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced`（见[评测文档](evaluation.md)）
-- **openjev**：本地开源复现（DeBERTa-v3-large，Apache-2.0，CPU 可跑），需要
-  `pip install git+https://github.com/kotoba-lang/typed-decisions`；英文训练，中文零样本不可用（已实测）
+- **openjev**（⚠️ 仅英文，留作消融对照，非中文场景可用后端）：本地开源复现（DeBERTa-v3-large，Apache-2.0，CPU 可跑），需要
+  `pip install git+https://github.com/kotoba-lang/typed-decisions`；英文训练，中文零样本 F1 仅 0.342（品牌名/方位词全高分误报）——在以中文为主的本项目里仅作「英文 only 模型不迁移到中文」的对照
 - **dryrun**：不调用任何模型，只打印将要发送的问题结构，用于离线检查
 
 > ⚠️ 官方 API 与开源模型均未公布中文专项基准，中文车载话语属于分布外场景，使用前请先用测试集实测（见[评测文档](evaluation.md)）。
+
+## 模型选型现状（2026-10 调研）
+
+针对「有没有比 laya-multilingual 更好的开源模型」做过一轮调研（HF 模型榜 + 逐个模型卡），结论：**中文类型化决策场景，laya-multilingual 仍是当前唯一成熟的开源选项，本项目选型没有过时**。
+
+- **Laya 家族**：只有 3 个 checkpoint——`laya`（ModernBERT-large 421M，纯英文）、`laya-multilingual`（mmBERT-base 322M，唯一多语言/中文可用）、`laya-typed-decisions`（421M 微调、通用基准 0.766 但纯英文）。没有更新/更大的多语言变体。
+- **新出现的同类模型全部不可用于中文**：`rony/gemma3-270m-typed-decisions`（270M、个人实验级、0 likes、实际仅英文）、`MSGEncrypted/ocf-typed-decisions-mbert-base`（mBERT、中文未验证、个人上传）、`fastino/GLiNER2.5-Decide`（340M、是**分类器**而非类型化决策、且仅英文、厂商自测基准）。都是英文 only / 中文未验证 / 个人原型级，不构成替代。
+- **官方 Jev API**：闭源远程付费（$0.042/1M tokens），高基数选项 + 校准比 laya 强但慢约 7.8×——不符合本项目「纯本地、零成本、车机/离线」约束。
+- **⚠️ 诚实定位**：laya-multilingual **在通用 typed-decisions 基准上零样本近乎随机（0.342）**，模型卡明说「能力来自微调」。jevCabin 能做到 F1 0.916 **完全靠领域工程**（姓氏过滤 + 强制选择 + 证据/否定门控），不是模型通用能力——这正是本项目的核心贡献，也与对抗子集 0.474（「工程盲区」）互相印证。
+- **最有价值的新发现——端侧变体**：社区已把 Laya 移植到多种端侧运行时——`litert-community/Laya-Multilingual-LiteRT`（Google LiteRT）、`AXERA-TECH/Laya`（爱芯元智边缘芯片），以及 GGUF / ONNX / CoreML / MXFP8 / MXFP4 / laya-browser。这为本项目「车机/嵌入式部署为未来工作」提供了现成路径（不必自己从头量化）。
+
+## 已知可优化项（laya 侧，TODO）
+
+模型卡记录的两个 laya 固有坑，与本项目管线直接相关，值得后续处理：
+
+1. **温度重校准**：laya-multilingual 出厂过自信，按 (问题类型, 选项数) 做温度校准后 ECE 从 0.314 降到 0.106。本项目现直接用原始 confidence 门控（如「置信度 <0.7 含糊回退」），校准后这些阈值会更可靠，可能直接提升含糊判定的准确率。
+2. **noul 标签跟随 bug（laya issue #156）**：noul 可能跟随 `false:`/`true:` 选项字面而非 state，官方 workaround 是改用「两选项 choice + 中性 key」。本项目 v3 的「单候选 noul 阈值门」和「锚点回退 noul 扫描」都用到 noul，值得核查是否中招、必要时换成两选项 choice 写法。
+
+（微调 laya-multilingual 是更高杠杆的路径——微调版 laya-typed-decisions 通用基准 0.766 vs 零样本 0.342——但项目定位是零样本 + 纯工程，故仅备注、不做。）
