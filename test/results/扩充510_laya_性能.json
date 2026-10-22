@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "date": "2026-10-22 16:48:45",
+    "backend": "laya",
+    "machine": "arm64",
+    "cpu": "Apple M4 Pro",
+    "python": "3.13.13",
+    "git_commit": "8fd6f5f",
+    "model": "convaiinnovations/laya/multilingual",
+    "in_file": "test/测试集_扩充10x.xlsx",
+    "candidate_filter": "surname",
+    "assembly": "forced",
+    "warmup": 3,
+    "rounds": 2
+  },
+  "suites": [
+    {
+      "variant": "laya",
+      "load_seconds": 5.65,
+      "n_utterances": 1022,
+      "wall_seconds": 49.3,
+      "throughput_per_min": 1243.5,
+      "latency_p50_s": 0.044,
+      "latency_p95_s": 0.105,
+      "latency_mean_s": 0.048,
+      "stage_mean_s": {
+        "t_candidates": 0.0,
+        "t_round1": 0.018,
+        "t_round2": 0.03
+      },
+      "mean_candidates": 1.2,
+      "mean_questions_r1": 0.9,
+      "mean_chunks_r1": 0,
+      "peak_rss_gb": 1.74
+    }
+  ],
+  "scaling": {
+    "laya": {
+      "state": "我不是史子涵我是梁晓燕",
+      "by_questions": {
+        "8": {
+          "mean_s": 0.07,
+          "chunks": 1
+        },
+        "16": {
+          "mean_s": 0.127,
+          "chunks": 1
+        }
+      }
+    }
+  }
+}

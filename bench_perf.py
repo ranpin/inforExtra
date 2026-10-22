@@ -8,7 +8,10 @@
   结果只描述 open-jev 本地后端的绝对性能
 
 用法: .venv/bin/python bench_perf.py
-产物: stdout 表格 + test/results/原始51_<backend>_性能.json（原始数据）
+      # 换测试集（如 510 条交叉验证）：
+      BENCH_IN=test/测试集_扩充10x.xlsx BENCH_OUT=test/results/扩充510_laya_性能.json \
+        BENCH_BACKEND=laya .venv/bin/python bench_perf.py
+产物: stdout 表格 + test/results/*_性能.json（原始数据）
 """
 
 import json
@@ -21,6 +24,8 @@ import sys
 import time
 
 BACKEND = os.getenv("BENCH_BACKEND", "openjev")  # openjev | laya
+IN_FILE = os.getenv("BENCH_IN", "test/测试集.xlsx")
+OUT_FILE = os.getenv("BENCH_OUT", f"test/results/原始51_{BACKEND}_性能.json")
 os.environ.setdefault("JEV_BACKEND", BACKEND)
 
 import jev_extract  # noqa: E402
@@ -33,7 +38,7 @@ SCALING_REPS = 3
 
 
 def load_inputs():
-    rows = read_rows("test/测试集.xlsx")
+    rows = read_rows(IN_FILE)
     return [a for a, _ in rows if a and a != "用户输入"]
 
 
@@ -133,6 +138,7 @@ def main():
             "git_commit": subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                                          capture_output=True, text=True).stdout.strip(),
             "model": model_name,
+            "in_file": IN_FILE,
             "candidate_filter": jev_extract.CANDIDATE_FILTER,
             "assembly": jev_extract.ASSEMBLY_MODE,
             "warmup": WARMUP,
@@ -170,7 +176,7 @@ def main():
         print(f"  {name}: " + "  ".join(
             f"{q}问={v['mean_s']}s({v['chunks']}块)" for q, v in sc.items()))
 
-    out_path = f"test/results/原始51_{BACKEND}_性能.json"
+    out_path = OUT_FILE
     os.makedirs("test/results", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)

@@ -177,7 +177,7 @@
 
       <div class="tbl-wrap">
         <table>
-          <caption>表 1 · 扩充集 510 条（10 个模板族，seed=42 构造即标注）</caption>
+          <caption>表 1 · 扩充集 510 条（10 个模板族，seed=42 构造即标注；laya v1/v3/v4 为同一模型 laya-multilingual，仅管线规则版本不同）</caption>
           <thead><tr>
             <th>指标</th><th class="num">laya v1</th><th class="num">laya v3（修复后）</th>
             <th class="num">laya v4（规则优化后）</th>
@@ -201,9 +201,9 @@
 
       <div class="tbl-wrap" style="margin-top:18px">
         <table>
-          <caption>表 2 · 性能对比（同机 51 条，Apple M4 Pro；原始数据 <code>test/results/原始51_*_性能.json</code>）</caption>
-          <thead><tr><th>指标</th><th class="num">旧管线（边车→平台）</th>
-            <th class="num">openjev-seq</th><th class="num">laya forced</th></tr></thead>
+          <caption>表 2 · 三种技术路线的性能对比（同机 51 条，Apple M4 Pro；原始数据 <code>test/results/原始51_*_性能.json</code>，510 条交叉验证见下方口径说明）</caption>
+          <thead><tr><th>指标</th><th class="num">旧管线 Qwen2.5-Omni-7B<br>（LLM 生成，边车→平台）</th>
+            <th class="num">open-jev<br>（DeBERTa-v3-large，仅英文）</th><th class="num">laya-multilingual v4<br>（mmBERT-base 322M）</th></tr></thead>
           <tbody>
             <tr><td>延迟 p50</td><td class="num">0.745s</td><td class="num">1.353s</td>
                 <td class="num"><b class="best">0.043s</b></td></tr>
@@ -223,6 +223,16 @@
         <b>取舍</b>：flash 精度更高（F1 0.964）但为远端 LLM 调用、按 token 计费；
         laya 精度略低（0.944，差 2 个点）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
         <span style="color:var(--ds-faint)">（laya vs 旧管线 omni-7b 的 17 倍加速见上方性能表、有 51 条 JSON 支撑；与 flash 的延迟倍数因 flash 延迟未入库，此处不列。）</span>
+      </p>
+      <p class="sec-note">
+        <b>两张表的轴</b>：表 1 回答「提取有多准」——laya 三列是<b>同一个 laya-multilingual（mmBERT-base 322M）模型</b>、只换管线规则版本（v1→v4），flash 是现代 LLM 精度参照；
+        表 2 回答「三种技术路线各有多快」——旧管线 Qwen2.5-Omni-7B（LLM 生成）、open-jev（DeBERTa-v3-large，英文类型化决策，消融对照）、laya-multilingual（多语类型化决策，本项目）。
+        omni/openjev 的精度只在 51 条真实种子集上测过（gold 来源 / 0.342 消融），flash 的延迟无同机基准产物（远端调用），故两表列集不同。
+      </p>
+      <p class="sec-note">
+        <b>性能为何在 51 条上测</b>：51 条是真实种子句、也是历史性能载体（旧管线复测需 13984 边车 + VPN，当前环境不可得）。
+        laya 单条延迟由前向结构决定、对集合选择不敏感——510 条扩充集交叉实测 p50 <b>0.044s</b>（51 条 0.043s，一致）；
+        p95 0.105s / 吞吐 1244 条/分低于 51 条（0.053s / 1427），因 510 集多人句占比更高（候选与扫描轮次更多）。原始数据 <code>test/results/扩充510_laya_性能.json</code>。
       </p>
     </section>
 

@@ -26,7 +26,7 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
 
 **性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/results/原始51_*_性能.json`）：
 
-| 指标（同机 51 条） | 旧管线（边车→平台） | openjev-seq | **laya forced（v4 重跑）** |
+| 指标（同机 51 条） | 旧管线 Qwen2.5-Omni-7B（边车→平台） | open-jev（DeBERTa-v3-large，仅英文） | **laya-multilingual v4（mmBERT-base 322M）** |
 |---|---|---|---|
 | 延迟 p50 | 0.745s | 1.353s | **0.043s** |
 | 延迟 p95 | 1.424s | 3.913s | **0.053s** |
@@ -35,6 +35,8 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
 | 每次调用成本 | 1400 prompt + 39 completion tokens | 本地机时 | 本地机时 |
 
 > 性能数字取自仓库内 `原始51_laya_性能.json`（v4 重跑，2026-10-21，git_commit `64b18a5`；meta 已补 `assembly=forced` 口径字段）。历史口径：v1 首跑 3.68s / 1425.1 条/分 / p95 0.052s；v3 重跑 3.98s / 1435.2 条/分 / p95 0.050s / p50 0.044s——v4 规则全为代码层修改（零新增前向），p50 三版一致 0.043~0.044s。上方准确率表为 **v1** 口径（对应 `原始51_laya强制选择.xlsx`）；v3 升到 F1 0.957，v4 进一步到 **F1 1.000、行级 50/50**（`原始51_laya强制选择v4.xlsx`），见下文「v4 规则优化」节。
+
+> **性能对集合选择不敏感（510 条交叉验证，2026-10-22）**：`BENCH_IN=test/测试集_扩充10x.xlsx BENCH_OUT=test/results/扩充510_laya_性能.json BENCH_BACKEND=laya python bench_perf.py` 实测 p50 **0.044s**（与 51 条 0.043s 一致）、p95 0.105s / 吞吐 1243.5 条/分（低于 51 条的 0.053s / 1427——510 集多人句占比更高，候选与扫描轮次更多）。性能载体仍用 51 条的原因：真实种子句，且旧管线 Qwen2.5-Omni-7B 复测需 13984 边车 + VPN（当前环境不可得），三列同集才构成同机可比。
 
 **结论**：
 - **laya-multilingual（mmBERT-base，Apache-2.0）+ 领域候选过滤 + 强制选择组装 = 比旧管线快 17 倍、人名 F1 0.936**，零样本、纯本地、零 token 成本。Jev 范式的性能主张（毫秒级、单前向）由 laya 在本地兑现
@@ -230,6 +232,7 @@ test/
     ├── 通用集_laya_v4r1.xlsx            # 通用试点首跑（laya 关系问题时代，关系 0.565 记录）
     ├── 原始51_openjev_性能.json         # open-jev 延迟基准（p50 1.353s）
     ├── 原始51_laya_性能.json            # laya 延迟基准（p50 0.043s，v4 重跑，meta 含 assembly=forced）
+    ├── 扩充510_laya_性能.json           # laya 510 条性能交叉验证（p50 0.044s 与 51 条一致；p95/吞吐因多人句占比更高而略低）
     ├── 原始51_omni7b_性能.json          # 旧管线 omni-7b 延迟（p50 0.745s）
     └── *_日志.txt                       # 各轮跑批日志
 ```
