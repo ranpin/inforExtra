@@ -22,6 +22,7 @@
 2. 结构化提取：Jev（System One 决策模型）完成车内人员/位置提取，人员与位置关联显示
 3. 提取范围限定：只对用户输入提取，不对模型回答二次提取；不提取地理地址
 4. 批量测试集处理与结果报告（P/R/F1 + 位置/身份 + 按模板族分解）
+5. 通用人物提取试点（v4③）：同一管线复用到通用对话（去座位、加说话人关系），滩头四族 F1 1.000——记忆系统提取阶段的候选原型
 
 ## 应用场景
 
@@ -102,6 +103,7 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 ├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
 ├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
 ├── eval_adversarial.py     # 对抗子集生成与评测（60 条分布外样本，三族各 20）
+├── eval_general.py         # 通用人物提取试点评测（7 族 95 条：自我介绍/介绍他人/打招呼/纠正/多人/负例/ASR）
 ├── fit_calibration.py      # laya 温度校准拟合（510 条域内；实测结论：决策中性，不接入管线）
 ├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
 ├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
