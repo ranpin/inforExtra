@@ -69,7 +69,7 @@
 
   /* ---- 表格 ---- */
   .tbl-wrap{overflow-x:auto;border:1px solid var(--ds-border);border-radius:10px;background:var(--ds-panel)}
-  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:520px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
   th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--ds-border)}
   th{background:var(--ds-code-bg);color:var(--ds-muted);font-weight:600;font-size:12.5px;white-space:nowrap}
   tr:last-child td{border-bottom:none}
@@ -95,7 +95,7 @@
         <h1>座舱人员信息提取 · jevCabin</h1>
         <button class="ds-theme-btn" type="button" onclick="toggleTheme()" aria-label="切换明暗主题"><span class="ds-theme-icon">🌙</span></button>
       </div>
-      <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.916</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
+      <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.944</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
       <div class="ie-badges">
         <span class="ie-badge">laya-multilingual · mmBERT 322M</span>
         <span class="ie-badge">纯本地推理</span>
@@ -180,15 +180,20 @@
           <caption>表 1 · 扩充集 510 条（10 个模板族，seed=42 构造即标注）</caption>
           <thead><tr>
             <th>指标</th><th class="num">laya v1</th><th class="num">laya v3（修复后）</th>
+            <th class="num">laya v4（规则优化后）</th>
             <th class="num">qwen3.8-flash（关思考）</th></tr></thead>
           <tbody>
             <tr><td>人名 P / R / F1</td><td class="num">0.885 / 0.719 / 0.793</td>
-                <td class="num">0.924 / 0.908 / <b class="best">0.916</b></td>
+                <td class="num">0.924 / 0.908 / 0.916</td>
+                <td class="num">0.958 / 0.931 / <b class="best">0.944</b></td>
                 <td class="num"><b class="best">0.964 / 0.964 / 0.964</b></td></tr>
             <tr><td>位置 / 身份准确率</td><td class="num">0.779 / 0.828</td>
-                <td class="num">0.755 / 0.796</td><td class="num"><b class="best">0.988 / 0.979</b></td></tr>
+                <td class="num">0.755 / 0.796</td>
+                <td class="num">0.799 / 0.885</td>
+                <td class="num"><b class="best">0.988 / 0.979</b></td></tr>
             <tr><td>行级全对</td><td class="num">368/510 (72.2%)</td>
-                <td class="num"><b class="best">444/510 (87.1%)</b></td>
+                <td class="num">444/510 (87.1%)</td>
+                <td class="num"><b class="best">462/510 (90.6%)</b></td>
                 <td class="num"><b class="best">491/510 (96.3%)</b></td></tr>
           </tbody>
         </table>
@@ -201,13 +206,13 @@
             <th class="num">openjev-seq</th><th class="num">laya forced</th></tr></thead>
           <tbody>
             <tr><td>延迟 p50</td><td class="num">0.745s</td><td class="num">1.353s</td>
-                <td class="num"><b class="best">0.044s</b></td></tr>
+                <td class="num"><b class="best">0.043s</b></td></tr>
             <tr><td>延迟 p95</td><td class="num">1.424s</td><td class="num">3.913s</td>
-                <td class="num"><b class="best">0.050s</b></td></tr>
+                <td class="num"><b class="best">0.053s</b></td></tr>
             <tr><td>吞吐</td><td class="num">~68 条/分</td><td class="num">38.8 条/分</td>
-                <td class="num"><b class="best">1435 条/分</b></td></tr>
+                <td class="num"><b class="best">1427 条/分</b></td></tr>
             <tr><td>加载 / 内存</td><td class="num">远端服务</td><td class="num">4.4s / 0.7GB</td>
-                <td class="num">3.98s / 3.0GB</td></tr>
+                <td class="num">4.41s / 3.0GB</td></tr>
             <tr><td>每次调用成本</td><td class="num">1400 prompt + 39 completion tokens</td>
                 <td class="num">本地机时</td><td class="num"><b class="best">本地机时</b></td></tr>
           </tbody>
@@ -216,7 +221,7 @@
 
       <p class="sec-note" style="margin-top:14px">
         <b>取舍</b>：flash 精度更高（F1 0.964）但为远端 LLM 调用、按 token 计费；
-        laya 精度略低（0.916）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
+        laya 精度略低（0.944，差 2 个点）却纯本地前向、零 token 成本、可离线——座舱场景要的是即时响应与零边际成本。
         <span style="color:var(--ds-faint)">（laya vs 旧管线 omni-7b 的 17 倍加速见上方性能表、有 51 条 JSON 支撑；与 flash 的延迟倍数因 flash 延迟未入库，此处不列。）</span>
       </p>
     </section>
@@ -230,32 +235,41 @@
         <div class="card">
           <h3>管线</h3>
           <ul class="tight">
-            <li><b>候选生成</b>：规则抽 CJK 称谓片段（姓氏过滤），不靠模型</li>
+            <li><b>候选生成</b>：规则抽 CJK 称谓片段（姓氏过滤 + 生僻姓/阿X/称谓锚点），不靠模型</li>
             <li><b>选择轮</b>：所有候选放进同一个 softmax 竞争（forced choice），同一轮调用内定谁是真的</li>
             <li><b>属性轮</b>：对每个赢家问 location（13 选项）/ identity（15 选项）</li>
-            <li><b>代码层门控</b>：否定句剔除、身份证据校验、称谓碎片清理</li>
+            <li><b>代码层门控</b>：否定句剔除（前向+后向线索）、身份/位置证据校验、称谓后缀拆分与碎片清理</li>
           </ul>
         </div>
         <div class="card">
-          <h3>v1 → v3 的三个免微调修复</h3>
+          <h3>v1 → v4 的七个免微调修复</h3>
           <ul class="tight">
-            <li><b>否定门控</b>：『不是/别叫我』引导的候选在代码层剔除——laya 的否定判断本身是噪声（被否定 0.71 vs 未否定 0.79，切不开）。否定句族 0.42 → <b class="best">1.00</b></li>
-            <li><b>锚点回退 + 增量扫描</b>：forced choice 对「小X」类名字系统性失效（0.06 vs 同上下文 noul 0.89），置信度含糊时回退普通扫描。多人族 0.38 → <b class="best">0.85</b></li>
-            <li><b>称谓碎片清理</b>：『陈部』⊂『陈部长』剔除，只认 老/部/经/医/师 首字。称谓无品牌族 0.55 → <b class="best">0.95</b></li>
+            <li><b>v3 否定门控</b>：『不是/别叫我』引导的候选在代码层剔除——laya 的否定判断本身是噪声（被否定 0.71 vs 未否定 0.79，切不开）。否定句族 0.42 → <b class="best">1.00</b></li>
+            <li><b>v3 锚点回退 + 增量扫描</b>：forced choice 对「小X」类名字系统性失效（0.06 vs 同上下文 noul 0.89），置信度含糊时回退普通扫描。多人族 0.38 → <b class="best">0.85</b></li>
+            <li><b>v3 称谓碎片清理</b>：『陈部』⊂『陈部长』剔除，只认 老/部/经/医/师 首字。称谓无品牌族 0.55 → <b class="best">0.95</b></li>
+            <li><b>v4 候选生成扩展</b>：生僻姓/阿X/称谓锚点（X老师）/语气词停用/叠字碎片清理。对抗集表外姓 0.000 → <b class="best">0.824</b>、ASR 0.878 → <b class="best">1.000</b></li>
+            <li><b>v4 否定门控泛化</b>：前向扩词（并非/当成/算不上…）+ 后向缺席线索（没来/不是我/不在车上…，就近关联不跨人）。真实否定 FP 15 → <b class="best">1</b></li>
+            <li><b>v4 称谓后缀拆分</b>：『小陈同学』→ 小陈+身份同学（仅当原文存在重叠候选）+ 身份后缀抑制 + 裸称谓剔除（bob小姐）。同学边界 0.56 → <b class="best">0.96</b>、拉丁名 0.72 → <b class="best">0.96</b></li>
+            <li><b>v4 位置证据门</b>：原文无任何位置词时位置回答置空（防幻觉）。位置准确率 0.755 → <b class="best">0.799</b></li>
           </ul>
         </div>
       </div>
       <p class="sec-note" style="margin-top:14px">
-        <b>已知短板（诚实边界）</b>：同学边界族 0.56（『小陈同学』会被切成『陈同学』）、拉丁名 0.72、
-        困难负例 12 个 FP（马上/高架/张家口）——属零样本上限，微调可解。位置准确率 0.755，左右方位仍会判反。
+        <b>已知短板（诚实边界）</b>：困难负例 12 个 FP（马上/高架/张家口——姓氏开头的普通词，
+        属零样本判别上限，微调可解）；位置准确率 0.799，左右方位仍会判反。
+        v4 已修复同学边界（0.56 → 0.96）与拉丁名（0.72 → 0.96）。
       </p>
       <p class="sec-note" style="margin-top:10px">
-        <b>⚠️ 分布外对抗子集（60 条，<code>eval_adversarial.py</code>）</b>：上面的 0.916 是<b>模板分布内</b>分数。
-        针对代码盲区另测三族各 20 条，人名 F1 掉到 <b>0.474</b>——
-        <b>表外姓</b>（翦/仝/冼/阿宝/大壮，姓氏不在过滤表）<b>20/20 全漏召</b>（surname 过滤的硬召回天花板）；
-        <b>真实否定</b>（别把我当成X / X不是我 / 并非X，线索不在门控表）<b>15/20 误报</b>；
-        <b>ASR 口语噪声</b>（填充/重复）F1 0.878 基本鲁棒。
-        结论：瓶颈在<b>词表覆盖与门控规则</b>（确定性代码边界，扩表/补规则可解），不在模型对真实语音的适应力。详见仓库 README「对抗子集评测」。
+        <b>⚠️ 分布外对抗子集（60 条，<code>eval_adversarial.py</code>）</b>：上面的 0.944 是<b>模板分布内</b>分数。
+        针对代码盲区另测三族各 20 条：v3 时人名 F1 掉到 <b>0.474</b>（表外姓 20/20 全漏召、真实否定 15/20 误报）——
+        印证瓶颈在<b>词表覆盖与门控规则</b>（确定性代码边界），不在模型；
+        v4 四条规则修复后升到 <b class="best">0.907</b>（表外姓 0.824、真实否定 FP 15→1、ASR 噪声 1.000）。
+        余 6 FN 为设计内排除（商/展/初等易撞词姓 + 大壮/胖子）+ 1 FP 留白（『我没说我是X』）。详见评测文档「对抗子集评测」与「v4 规则优化」。
+      </p>
+      <p class="sec-note" style="margin-top:10px">
+        <b>泛化试点（v4③）</b>：同一管线把位置问题换成「说话人关系」（代码线索指派）即迁移到通用对话——
+        自我介绍/介绍他人/打招呼/纠正四族 95 条，人名 F1 <b class="best">0.957</b>、关系/身份准确率 88/88；
+        纠正句式（『不对我叫X』）是记忆系统 UPDATE/SUPERSEDE 的提取侧信号。详见评测文档「通用人物提取试点」。
       </p>
     </section>
 
@@ -271,10 +285,10 @@ pip install -r requirements.txt        # 含 laya / torch
 python demo/server.py                  # 启动时预加载模型，约 3-5s
 # 浏览器打开 http://127.0.0.1:8000</code></pre>
         <ul class="tight">
-          <li>默认已置 v3 最优配置：<code>JEV_BACKEND=laya</code> <code>JEV_CANDIDATE_FILTER=surname</code> <code>JEV_ASSEMBLY=forced</code></li>
+          <li>默认已置 laya 最优配置：<code>JEV_BACKEND=laya</code> <code>JEV_CANDIDATE_FILTER=surname</code> <code>JEV_ASSEMBLY=forced</code></li>
           <li>HF 主站不可达的环境会自动走本地缓存（<code>HF_HUB_OFFLINE=1</code>）</li>
           <li>demo 服务只用 Python 标准库 <code>http.server</code>，不引入额外 Web 框架依赖</li>
-          <li>评测复现：<code>python compare_results.py test/results/扩充510_laya强制选择v3.xlsx test/测试集_扩充10x_gold.xlsx</code></li>
+          <li>评测复现：<code>python compare_results.py test/results/扩充510_laya强制选择v4.xlsx test/测试集_扩充10x_gold.xlsx</code></li>
         </ul>
       </div>
     </section>
@@ -287,7 +301,8 @@ python demo/server.py                  # 启动时预加载模型，约 3-5s
 
 <script>
 "use strict";
-// ===== 预录回放数据：由真实 laya 推理产出后固化（Apple M4 Pro）=====
+// ===== 预录回放数据：由真实 laya 推理产出后固化（Apple M4 Pro）；
+// ===== 2026-10-22 已用 v4 管线逐条复核，输出（人物/身份/位置/问题数）逐项一致
 const REPLAY = [
  {"text":"副驾坐的是日产的小王","elapsed_ms":257.4,
   "persons":[{"name":"小王","identity":"","location":"副驾"}],

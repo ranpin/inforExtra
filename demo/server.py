@@ -8,7 +8,7 @@
 然后浏览器打开 http://127.0.0.1:8000
 
 可用环境变量覆盖：DEMO_HOST / DEMO_PORT，以及 jev_extract 自身的
-JEV_BACKEND / JEV_CANDIDATE_FILTER / JEV_ASSEMBLY 等（默认已置为 v3 最优配置）。
+JEV_BACKEND / JEV_CANDIDATE_FILTER / JEV_ASSEMBLY 等（默认已置为 laya 最优配置）。
 """
 
 import json
@@ -23,7 +23,7 @@ DEMO_DIR = Path(__file__).resolve().parent
 ROOT = DEMO_DIR.parent
 sys.path.insert(0, str(ROOT))
 
-# v3 最优配置（见 README「laya 最优配置」）；setdefault 允许外部覆盖
+# laya 最优配置（见 docs/architecture.md「后端配置」）；setdefault 允许外部覆盖
 os.environ.setdefault("JEV_BACKEND", "laya")
 os.environ.setdefault("JEV_CANDIDATE_FILTER", "surname")
 os.environ.setdefault("JEV_ASSEMBLY", "forced")
