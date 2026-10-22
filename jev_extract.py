@@ -92,12 +92,20 @@ SPLIT_SUFFIXES = ("同学", "老师", "师傅", "先生", "小姐", "女士")
 BARE_TITLE_WORDS = frozenset(("同学", "老师", "师傅", "先生", "小姐", "女士",
                               "医生", "经理", "老板", "部长", "司机", "护士"))
 
+# v4③：完整称谓词——候选片段不允许从这些词的内部起点。「工程师郑刚」会生成
+# 跨界碎片「程师郑」（程∈姓氏表），laya 实测偏好它胜过真名 郑刚；这些称谓词
+# 内部字符只有 程（工程师）是姓氏，故本规则对合法候选零影响
+TITLE_WORDS_FULL = ("工程师", "老师", "医生", "经理", "老板", "师傅", "同学",
+                    "学生", "护士", "司机", "部长", "先生", "小姐", "女士")
+
 # 候选片段中出现这些字符即丢弃（功能词/动词/问候语，几乎不可能出现在姓名或称谓里）
 STOPWORD_CHARS = set(
     "的我你他她它是在坐了有叫别不这那就都也还很吗吧啊呢给和跟向对把让被从到说"
     "快打招呼请问候兴见真早"
     # v4：句尾语气词与否定动词「没」（ASR 口语碎片「小吴哈/周总没错」），无姓名含这些字
     "哈嘛哦诶嗯呗啦咯呀哟哇嘞没"
+    # v4③：敬称代词「您」（「郑工您好」会生成跨界碎片 郑工您，实测劫持赢家/稀释 softmax）
+    "您"
 )
 
 LOCATION_OPTIONS = [
@@ -124,6 +132,35 @@ IDENTITY_QUESTION = (
 NO_LOCATION = "未提及"
 NO_IDENTITY = "未提及"
 
+# ---------------------------------------------------------------- v4③ 通用人物提取试点
+# 通用对话域（打招呼/自我介绍/介绍他人/纠正）：去掉车内位置，换成说话人关系。
+# 战略用途：mirix-cpp Q4 提取阶段的候选原型——Mem0 的提取阶段用 LLM（φ），
+# 类型化决策 ~44ms 本地提取是端侧替代；纠正句式（『不对我叫X』）是
+# UPDATE/SUPERSEDE 的提取侧信号。两项目保持边界，本模块只验证通用域可行性。
+#
+# 关系由代码按表层线索直接指派，不问 laya：零样本关系回答实测 0.565 且
+# 错误系统性（『叫我X』漏判本人、『这是我妻子X』答本人或空、多人句关系
+# 串到另一人、中性句幻觉朋友）——介绍句法里关系是确定性表层措辞，
+# 同否定门控方法论：代码管确定性句法，模型管语义判别。
+RELATION_CUES = (
+    ("说话人本人", ("我是", "我叫", "叫我", "喊我", "称呼我", "我的名字是")),
+    ("家人", ("妻子", "丈夫", "儿子", "女儿", "老婆", "老公", "爸爸", "妈妈",
+              "父亲", "母亲", "哥哥", "姐姐", "弟弟", "妹妹", "孩子", "家人",
+              "我哥", "我姐", "我弟", "我妹", "媳妇", "爱人")),
+    ("朋友", ("朋友", "哥们", "闺蜜", "发小")),
+    ("同事", ("同事", "搭档")),
+)
+RELATION_CUE_MAX_GAP = 8
+# 通用域身份 = 职业称谓（同事/朋友 归关系线索，不在此重复）
+GENERAL_IDENTITY_OPTIONS = [
+    "未提及", "老师", "医生", "经理", "老板", "工程师",
+    "同学", "学生", "护士", "师傅",
+]
+GENERAL_IDENTITY_QUESTION = (
+    "这个人物在这句话中的身份或称谓是什么？只有句子明确说明了身份"
+    "（如『工程师小李』『我的同学小张』）才选对应项，没有明确说明就选未提及"
+)
+
 
 # ---------------------------------------------------------------- 候选生成
 
@@ -145,6 +182,17 @@ def _keep_cjk_span(s):
         return True
     if w == 3 and s[1:] in TITLE_SUFFIXES and s[0] not in TITLE_PREFIX_BLOCK:
         return True
+    return False
+
+
+def _inside_title_word(text, start):
+    """v4③：start 是否落在某个称谓词出现的内部（非词首）——阻断跨界碎片。"""
+    for w in TITLE_WORDS_FULL:
+        pos = text.find(w)
+        while pos >= 0:
+            if pos < start < pos + len(w):
+                return True
+            pos = text.find(w, pos + 1)
     return False
 
 
@@ -174,6 +222,8 @@ def generate_candidates(text):
             if any(ch in STOPWORD_CHARS for ch in s):
                 continue
             if not _keep_cjk_span(s):
+                continue
+            if _inside_title_word(text, i):
                 continue
             add(i, i + width, s)
 
@@ -347,6 +397,38 @@ def _following_title(text, cand):
         if text[cand["end"]:cand["end"] + len(suf)] == suf:
             return suf
     return None
+
+
+def _relation_from_cues(text, cand, others):
+    """v4③ 试点：按表层线索给赢家指派说话人关系。
+
+    本人线索优先；其余取距人名最近的关系词。线索只向前关联（结束于人名
+    之前）、距离 ≤ RELATION_CUE_MAX_GAP、且不跨越其他赢家——『我是胡平，
+    这是我朋友吴刚』的 我是 不能越过 胡平 给 吴刚 指派本人。
+    找不到线索返回 ""（未提及）。
+    """
+    start = cand["start"]
+
+    def usable(cue_end):
+        if not 0 <= start - cue_end <= RELATION_CUE_MAX_GAP:
+            return False
+        return not any(o["start"] >= cue_end and o["end"] <= start
+                       for o in others)
+
+    best_rel, best_end = "", -1
+    for rel, cues in RELATION_CUES:
+        for cue in cues:
+            pos = text.rfind(cue, 0, start)
+            if pos < 0:
+                continue
+            cue_end = pos + len(cue)
+            if not usable(cue_end):
+                continue
+            if rel == "说话人本人":
+                return rel
+            if cue_end > best_end:
+                best_rel, best_end = rel, cue_end
+    return best_rel
 
 
 def group_overlapping(passing):
@@ -642,8 +724,11 @@ def _answer_value(answers, qid, kind):
 PERF = {}
 
 
-def _extract_forced(user_input, backend, cands):
+def _extract_forced(user_input, backend, cands, task="cockpit"):
     """锚点强制选择 + 增量 noul 扫描（laya 验证形态）。
+
+    task="general"（通用人物提取试点）时属性轮改问 关系/身份，
+    cockpit 路径的问题构造与顺序保持不变。
 
     第 1 轮：全部候选在同一个 choice 的 softmax 内竞争出锚点人物
     （单候选退化为 noul 阈值门）。第 2 轮：对剩余候选一次性做带
@@ -762,50 +847,65 @@ def _extract_forced(user_input, backend, cands):
     PERF["winners"] = [(c["text"], p, path)
                        for (c, p, _suf), path in zip(split_winners, winner_paths)]
 
-    # v4 位置文本证据门：原文没有任何位置词时，位置回答必是幻觉
+    # v4 位置文本证据门（cockpit 专用）：原文没有任何位置词时，位置回答必是幻觉
     # （困难负例 马上/高架 全部幻觉出位置；否定句/自我介绍 gold 位置为空也被幻觉）。
     # 只验证「原文存在某个位置词」而非预测的具体选项词——gold 与问题措辞都允许
     # 右后→右后座 类同义映射，严格验证会误杀此类正确行（510 实测 2 行）
-    loc_evidence = any(o in user_input for o in LOCATION_OPTIONS
-                       if o != NO_LOCATION)
+    loc_evidence = task != "general" and any(
+        o in user_input for o in LOCATION_OPTIONS if o != NO_LOCATION)
+    id_options = GENERAL_IDENTITY_OPTIONS if task == "general" else IDENTITY_OPTIONS
+    id_question = GENERAL_IDENTITY_QUESTION if task == "general" else IDENTITY_QUESTION
 
-    # --- 属性轮：每个赢家取 location/identity ---
+    # --- 属性轮：cockpit 取 location/identity，general（试点）取 relation/identity ---
     persons = []
     for c, _p, suf in split_winners:
         t0 = time.perf_counter()
-        try:
-            attr = backend.ask(user_input, {
+        if task == "general":
+            # 关系由代码按 RELATION_CUES 直接指派（laya 零样本关系实测 0.565
+            # 且错误系统性，见常量注释），只问 laya 身份
+            qs = {
+                "id": {"type": "choice",
+                       "instructions": f"『{c['text']}』" + id_question,
+                       "criteria": {o: "" for o in id_options}},
+            }
+        else:
+            qs = {
                 "loc": {"type": "choice",
                         "instructions": f"『{c['text']}』" + LOCATION_QUESTION,
                         "criteria": {o: "" for o in LOCATION_OPTIONS}},
                 "id": {"type": "choice",
                        "instructions": f"『{c['text']}』" + IDENTITY_QUESTION,
                        "criteria": {o: "" for o in IDENTITY_OPTIONS}},
-            })
+            }
+        try:
+            attr = backend.ask(user_input, qs)
         except Exception as e:  # noqa: BLE001
             print(f"Jev 属性轮失败: {e}")
             attr = {}
         t_round2 += time.perf_counter() - t0
-        n_q2 += 2
-        loc = _answer_value(attr, "loc", "choice") or ""
-        loc = "" if loc == NO_LOCATION else loc
-        if loc and not loc_evidence:
-            loc = ""
+        n_q2 += 1 if task == "general" else 2
         ident = _answer_value(attr, "id", "choice") or ""
         ident = "" if ident == NO_IDENTITY else ident
         if not _identity_supported(user_input, c["text"], ident):
             ident = ""
         # 拆分携带的身份证据优先（同学/老师 ∈ 选项表）；身份是名字自身
         # 后缀时按 gold 约定抑制（陈同学+同学 / 陈部长+部长 → 称谓留在名中，身份空）
-        if suf and suf in IDENTITY_OPTIONS:
+        if suf and suf in id_options:
             ident = suf
         if ident and c["text"].endswith(ident):
             ident = ""
-        persons.append({
-            "name": c["text"],
-            "identity": ident,
-            "location": loc,
-        })
+        if task == "general":
+            others = [c2 for c2, _pw, _sf in split_winners if c2 is not c]
+            rel = _relation_from_cues(user_input, c, others)
+            persons.append({"name": c["text"], "identity": ident,
+                            "relation": rel})
+        else:
+            loc = _answer_value(attr, "loc", "choice") or ""
+            loc = "" if loc == NO_LOCATION else loc
+            if loc and not loc_evidence:
+                loc = ""
+            persons.append({"name": c["text"], "identity": ident,
+                            "location": loc})
     PERF.update({"t_round1": t_round1, "t_round2": t_round2,
                  "n_questions_r1": n_q1, "n_questions_r2": n_q2})
     persons.sort(key=lambda p: next(
@@ -927,6 +1027,44 @@ def extract_entities(user_input):
               f"一轮={PERF['t_round1']:.2f}s 二轮={PERF['t_round2']:.2f}s "
               f"总计={PERF['t_total']:.2f}s")
     return {"persons": persons}
+
+
+def extract_entities_general(user_input):
+    """通用人物提取（v4③ 试点）：输入任意对话文本，返回
+    {"persons": [{"name", "identity", "relation"}]}。
+
+    与座舱版共享候选生成/否定门控/强制选择组装（task="general"），
+    属性轮把「车内位置」换成「说话人关系」——打招呼/自我介绍/介绍他人/
+    纠正句式为滩头，作为 mirix-cpp Q4 提取阶段的候选原型。
+    始终走 forced 组装（laya 验证形态），不受 JEV_ASSEMBLY 影响。
+    """
+    t_start = time.perf_counter()
+    PERF.update({"n_candidates": 0, "n_questions_r1": 0, "n_chunks_r1": 0,
+                 "n_questions_r2": 0, "t_candidates": 0.0, "t_round1": 0.0,
+                 "t_round2": 0.0, "t_total": 0.0, "winners": []})
+    try:
+        backend = get_backend()
+    except Exception as e:  # noqa: BLE001
+        print(f"Jev 后端不可用: {e}")
+        return {"persons": []}
+
+    t0 = time.perf_counter()
+    cands = generate_candidates(user_input)
+    cands = [c for c in cands if not _is_negated(user_input, c["text"])]
+    back_neg = _backward_negated(user_input, cands)
+    cands = [c for c in cands if c["id"] not in back_neg]
+    PERF["t_candidates"] = time.perf_counter() - t0
+    PERF["n_candidates"] = len(cands)
+    if not cands:
+        PERF["t_total"] = time.perf_counter() - t_start
+        return {"persons": []}
+
+    result = _extract_forced(user_input, backend, cands, task="general")
+    PERF["t_total"] = time.perf_counter() - t_start
+    if os.getenv("JEV_PERF"):
+        print(f"[perf] 候选={PERF['n_candidates']} 一轮={PERF['t_round1']:.2f}s "
+              f"属性={PERF['t_round2']:.2f}s 总计={PERF['t_total']:.2f}s")
+    return result
 
 
 # ---------------------------------------------------------------- 自检
