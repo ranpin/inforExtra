@@ -20,6 +20,10 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import json
+import sys
+
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（导入 jev_extract）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import jev_extract
 import openpyxl
 

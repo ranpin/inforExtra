@@ -28,6 +28,8 @@ IN_FILE = os.getenv("BENCH_IN", "test/测试集.xlsx")
 OUT_FILE = os.getenv("BENCH_OUT", f"test/results/原始51_{BACKEND}_性能.json")
 os.environ.setdefault("JEV_BACKEND", BACKEND)
 
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（导入 jev_extract / compare_results）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import jev_extract  # noqa: E402
 from jev_extract import build_questions, generate_candidates  # noqa: E402
 from compare_results import read_rows  # noqa: E402

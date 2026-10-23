@@ -93,7 +93,7 @@ export async function extract(text) {
     elapsedMs: performance.now() - t0,
     perf: {
       nCandidates: PERF.nCandidates, nQ1: PERF.nQ1, nQ2: PERF.nQ2,
-      winners: PERF.winners,
+      winners: PERF.winners, trace: PERF.trace,
     },
   };
 }

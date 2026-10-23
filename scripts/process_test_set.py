@@ -5,6 +5,9 @@ import sys
 import os
 import time
 from contextlib import redirect_stdout, redirect_stderr
+
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（导入 jev_extract / model_config）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from jev_extract import extract_entities
 from model_config import (
     client,

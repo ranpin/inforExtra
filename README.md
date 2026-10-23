@@ -31,7 +31,7 @@
 
 ## 演示 Demo
 
-- **在线展示页**（预录回放 + 可选浏览器实时推理——模型跑在访客浏览器里，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
+- **在线展示页**（预录回放 + 可选浏览器实时推理——模型跑在访客浏览器里；座舱图可交互、例句按场景分类、管线轨迹可展开看每步中间结果）：<https://ranpin.github.io/jevCabin/>
 - **本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
 
 ```bash
@@ -61,7 +61,7 @@ OPENAI_EXTRACTION_MODEL=your-local-model-name   # 可选
 
 ```bash
 python qwen_chat.py         # 交互式：输入车内人员描述 → 对话回答 + 结构化提取
-python process_test_set.py  # 批量评测 test/测试集.xlsx（--skip-chat 只跑提取，无需 LLM 服务；--out/--log 指定产物路径）
+python scripts/process_test_set.py  # 批量评测 test/测试集.xlsx（--skip-chat 只跑提取，无需 LLM 服务；--out/--log 指定产物路径）
 python jev_extract.py --selftest             # 提取自检（离线）：候选生成层覆盖 gold 全部人名（47/47）
 JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构，不调用模型
 ```
@@ -69,28 +69,29 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 ## 仓库结构
 
 ```
+├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
+│                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控，
+│                           #   v5：介绍/品牌线索锚点 + 位置文本绑定 + 公司品牌提取 + 执行轨迹埋点）
+├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
+├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
+├── scripts/                # 评测与基准工具（一律从仓库根运行：python scripts/xxx.py）
+│   ├── process_test_set.py # 批量评测（--in/--out/--log/--skip-chat）
+│   ├── expand_test_set.py  # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
+│   ├── compare_results.py  # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
+│   ├── eval_adversarial.py # 对抗子集生成与评测（60 条分布外样本，三族各 20）
+│   ├── eval_general.py     # 通用人物提取试点评测（7 族 95 条：自我介绍/介绍他人/打招呼/纠正/多人/负例/ASR）
+│   ├── fit_calibration.py  # laya 温度校准拟合（510 条域内；实测结论：决策中性，不接入管线）
+│   ├── eval_llm_baseline.py # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
+│   ├── bench_perf.py       # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
+│   └── bench_baseline_llm.py # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
 ├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
 ├── web/                    # 浏览器 live 推理（pipeline.js = jev_extract.py v5 逐函数移植、
 │                           #   live.js = HF 直连+hf-mirror 回退、parity.html = 51 条对拍 harness）
 ├── docs/
 │   ├── index.html          # 线上展示页（预录回放 + 可选浏览器实时推理，GitHub Pages 承载）
-│   ├── assets/             # laya-live.bundle.js（esbuild 打包产物，260KB）
+│   ├── assets/             # laya-live.bundle.js（esbuild 打包产物）
 │   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置、浏览器端部署）
 │   └── evaluation.md       # 完整评测（51/510 条、对抗子集、浏览器 live 对拍、复现命令、产物清单）
-├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
-│                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控，
-│                           #   v5：介绍/品牌线索锚点 + 位置文本绑定 + 公司品牌提取）
-├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
-├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
-├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）
-├── expand_test_set.py      # 扩充集生成器（seed=42 构造即标注，511 条 / 10 模板族）
-├── compare_results.py      # 结果 vs gold 对比（P/R/F1 + 位置/身份 + 按模板族分解）
-├── eval_adversarial.py     # 对抗子集生成与评测（60 条分布外样本，三族各 20）
-├── eval_general.py         # 通用人物提取试点评测（7 族 95 条：自我介绍/介绍他人/打招呼/纠正/多人/负例/ASR）
-├── fit_calibration.py      # laya 温度校准拟合（510 条域内；实测结论：决策中性，不接入管线）
-├── eval_llm_baseline.py    # 旧管线准确率评测（任意平台模型，--no-thinking 关思考）
-├── bench_perf.py           # Jev 侧性能基准 E1-E4（BENCH_BACKEND=openjev|laya）
-├── bench_baseline_llm.py   # 旧管线延迟基线（从 git 历史加载旧函数，需 13984 边车）
 └── test/                   # 测试集 + gold + results/（全部实验产物，清单见评测文档）
 ```
 

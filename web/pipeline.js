@@ -20,7 +20,7 @@ export const FORCED_MAX_PERSONS = 5;
 export const MAX_CANDIDATES = 60;
 
 /** 每次调用的统计（镜像 Python PERF；live.js 读取供页面展示）。 */
-export const PERF = { nCandidates: 0, nQ1: 0, nQ2: 0, winners: [] };
+export const PERF = { nCandidates: 0, nQ1: 0, nQ2: 0, winners: [], trace: null };
 
 export const FORCED_NO_PERSON = "没有人物";
 export const FORCED_INSTRUCTIONS =
@@ -275,9 +275,18 @@ export function cueDedup(hits) {
 }
 
 export function introCued(text, cands) {
-  const hits = cands.filter((c) => INTRO_CUES.some(
-    (cue) => text.slice(Math.max(0, c.start - cue.length), c.start) === cue));
-  return cueDedup(hits);
+  const hits = [];
+  for (const c of cands) {
+    for (const cue of INTRO_CUES) {
+      if (text.slice(Math.max(0, c.start - cue.length), c.start) === cue) {
+        hits.push([c, cue]);
+        break;
+      }
+    }
+  }
+  const dedup = cueDedup(hits.map((h) => h[0]));
+  if (dedup === null) return [null, null];
+  return hits.find((h) => h[0] === dedup);
 }
 
 export function brandCued(text, cands) {
@@ -287,12 +296,14 @@ export function brandCued(text, cands) {
     for (const w of COMPANY_WORDS_BY_LEN) {
       const s = c.start - 1 - w.length;
       if (s >= 0 && text.slice(s, c.start - 1) === w) {
-        hits.push(c);
+        hits.push([c, w]);
         break;
       }
     }
   }
-  return cueDedup(hits);
+  const dedup = cueDedup(hits.map((h) => h[0]));
+  if (dedup === null) return [null, null];
+  return hits.find((h) => h[0] === dedup);
 }
 
 export function locOccurrences(text) {
@@ -469,15 +480,27 @@ export async function extractForced(agent, userInput, cands) {
   PERF.winners = [];
   let anchor = null;
   let fallbackWinners = null;
-  const intro = introCued(userInput, cands);
-  const brand = intro !== null ? null : brandCued(userInput, cands);
+  // 管线执行轨迹（展示页「中间结果」展开用；纯埋点记录，不影响任何决策）
+  let trace = PERF.trace;
+  if (!trace) {
+    trace = PERF.trace = { cands: cands.map((c) => c.text), excluded: [],
+      round1: {}, scan: [], attrs: [], gates: [] };
+  }
+  const traceGates = [];
+  const r4 = (x) => Math.round(x * 1e4) / 1e4;
+  const [intro, introCue] = introCued(userInput, cands);
+  const [brand, brandWord] = intro !== null ? [null, null]
+    : brandCued(userInput, cands);
   try {
     if (intro !== null) {
       // v5 规则5：介绍线索紧邻 → 确定性锚点，跳过模型门控
       anchor = [intro, null];
+      trace.round1 = { path: "intro_cue", cue: introCue, name: intro.text };
     } else if (brand !== null) {
       // v5 规则7：『[公司词]的』紧邻引导 → 确定性锚点（『小鹏的周平』）
       anchor = [brand, null];
+      trace.round1 = { path: "brand_cue", cue: brandWord + "的",
+        name: brand.text };
     } else if (cands.length === 1) {
       const c = cands[0];
       const ans = await askLaya(agent, userInput, {
@@ -487,6 +510,7 @@ export async function extractForced(agent, userInput, cands) {
         },
       });
       const p = (ans.pick_is || {}).noul || 0;
+      trace.round1 = { path: "single_noul", name: c.text, p: r4(p) };
       if (p >= IS_PERSON_THRESHOLD) anchor = [c, p];
     } else {
       const criteria = {};
@@ -499,9 +523,13 @@ export async function extractForced(agent, userInput, cands) {
       const win = pick.choice;
       const probs = pick.probabilities || {};
       const pWin = probs[win] || 0;
+      const top = Object.entries(probs).sort((a, b) => b[1] - a[1]).slice(0, 4);
+      trace.round1 = { path: "forced", winner: win, p_win: r4(pWin),
+        accepted: false, probs: top.map(([k, v]) => [k, r4(v)]) };
       const winner = cands.find((c) => c.text === win) || null;
       if (winner !== null && win !== FORCED_NO_PERSON && pWin >= FORCED_MIN_P) {
         anchor = [winner, pWin];
+        trace.round1.accepted = true;
       } else if ((probs[FORCED_NO_PERSON] || 0) < NO_PERSON_CONFIDENT) {
         // 强制选择失败且『没有人物』置信度低（含糊）→ 普通 noul 扫描兜底
         const qs = {};
@@ -519,6 +547,7 @@ export async function extractForced(agent, userInput, cands) {
         for (const item of passed) {
           if (!fallbackWinners.some((k) => overlaps(item[0], k[0]))) fallbackWinners.push(item);
         }
+        trace.round1.fallback = fallbackWinners.map(([c, p]) => [c.text, r4(p)]);
       }
     }
   } catch (e) {
@@ -527,6 +556,7 @@ export async function extractForced(agent, userInput, cands) {
   PERF.nQ1 = (intro !== null || brand !== null) ? 0 : 1;
   // 注意：Python `if fallback_winners:` 对空列表为假——JS 空数组为真，须显式判 length
   if (anchor === null && (!fallbackWinners || fallbackWinners.length === 0)) {
+    trace.gates = traceGates;
     return { persons: [] };
   }
 
@@ -563,6 +593,7 @@ export async function extractForced(agent, userInput, cands) {
             winnerPaths.push("scan");
           }
         }
+        trace.scan = passed.map(([c, p]) => [c.text, r4(p)]);
       } catch (e) {
         console.warn("Jev 增量扫描失败:", e);
       }
@@ -576,6 +607,9 @@ export async function extractForced(agent, userInput, cands) {
   const splitWinners = [];
   for (const [c, p] of winners) {
     let [repl, suf] = titleSplit(cands, c);
+    if (repl !== null) {
+      traceGates.push(["title_split", c.text, `${repl.text} + 身份 ${suf}`]);
+    }
     if (repl === null) suf = followingTitle(userInput, c);
     splitWinners.push([repl || c, p, suf]);
   }
@@ -609,27 +643,45 @@ export async function extractForced(agent, userInput, cands) {
       console.warn("Jev 属性轮失败:", e);
     }
     PERF.nQ2 += 2;
-    let ident = ((attr.id || {}).choice) || "";
-    ident = ident === NO_IDENTITY ? "" : ident;
-    if (!identitySupported(userInput, c.text, ident)) ident = "";
+    const idRaw = ((attr.id || {}).choice) || "";
+    const idP = r4((((attr.id || {}).probabilities) || {})[idRaw] || 0);
+    let ident = idRaw === NO_IDENTITY ? "" : idRaw;
+    if (!identitySupported(userInput, c.text, ident)) {
+      if (ident) traceGates.push(["id_evidence", c.text, ident]);
+      ident = "";
+    }
     // 拆分携带的身份证据优先；身份是名字自身后缀时按 gold 约定抑制
     if (suf && IDENTITY_OPTIONS.includes(suf)) ident = suf;
-    if (ident && c.text.endsWith(ident)) ident = "";
-    let loc = ((attr.loc || {}).choice) || "";
-    loc = loc === NO_LOCATION ? "" : loc;
-    if (loc && !locEvidence) loc = "";
+    if (ident && c.text.endsWith(ident)) {
+      traceGates.push(["id_suffix", c.text, ident]);
+      ident = "";
+    }
+    const locRaw = ((attr.loc || {}).choice) || "";
+    const locP = r4((((attr.loc || {}).probabilities) || {})[locRaw] || 0);
+    let loc = locRaw === NO_LOCATION ? "" : locRaw;
+    if (loc && !locEvidence) {
+      traceGates.push(["loc_evidence", c.text, loc]);
+      loc = "";
+    }
     if (loc) {
       // v5 规则6：原文确定性绑定的座位词与模型回答冲突 → 覆盖（含区域级粗答）；
       // 同座异名（右后→右后座）保留模型答案
       const others = splitWinners.filter(([c2]) => c2 !== c).map(([c2]) => c2);
       const bound = boundLocWord(userInput, c, others);
       const gBound = bound ? LOC_SEAT_GROUP[bound] : undefined;
-      if (gBound && LOC_SEAT_GROUP[loc] !== gBound) loc = bound;
+      if (gBound && LOC_SEAT_GROUP[loc] !== gBound) {
+        traceGates.push(["loc_override", c.text, `${loc}→${bound}`]);
+        loc = bound;
+      }
     }
     // v5 规则7：公司/品牌就近绑定（确定性词表，零模型调用）
     const company = companyFor(userInput, c, splitWinners.map(([c2]) => c2)) || "";
+    if (company) traceGates.push(["company", c.text, company]);
+    trace.attrs.push({ name: c.text, loc: locRaw, loc_p: locP,
+      id: idRaw, id_p: idP });
     persons.push({ name: c.text, identity: ident, location: loc, company });
   }
+  trace.gates = traceGates;
   persons.sort((a, b) => {
     const ca = cands.find((c) => c.text === a.name);
     const cb = cands.find((c) => c.text === b.name);
@@ -640,11 +692,20 @@ export async function extractForced(agent, userInput, cands) {
 
 /** 完整管线入口（对应 extract_entities 的 forced 模式 = laya 最优配置）。 */
 export async function extractEntities(agent, userInput) {
-  let cands = generateCandidates(userInput);
-  cands = cands.filter((c) => !isNegated(userInput, c.text));
+  const rawCands = generateCandidates(userInput);
+  const fwdNeg = [];
+  let cands = [];
+  for (const c of rawCands) {
+    if (isNegated(userInput, c.text)) fwdNeg.push(c); else cands.push(c);
+  }
   const backNeg = backwardNegated(userInput, cands);
+  const excluded = fwdNeg.map((c) => [c.text, "前向否定线索"])
+    .concat(cands.filter((c) => backNeg.has(c.id))
+      .map((c) => [c.text, "后向缺席线索"]));
   cands = cands.filter((c) => !backNeg.has(c.id));
   PERF.nCandidates = cands.length;
+  PERF.trace = { cands: cands.map((c) => c.text), excluded,
+    round1: {}, scan: [], attrs: [], gates: [] };
   if (!cands.length) {
     PERF.nQ1 = 0;
     PERF.nQ2 = 0;

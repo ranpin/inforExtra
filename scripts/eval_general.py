@@ -22,6 +22,10 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import openpyxl  # noqa: E402
 
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（导入 jev_extract）
+import sys  # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import jev_extract  # noqa: E402
 
 RNG = random.Random(42)

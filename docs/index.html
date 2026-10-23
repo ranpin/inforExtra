@@ -50,7 +50,7 @@
     padding:5px 11px;border-radius:999px;cursor:pointer;transition:all .15s;font-family:inherit}
   .chip:hover{color:var(--ds-accent);border-color:var(--ds-accent);background:var(--ds-accent-soft)}
   .chip.active{color:#fff;background:var(--ds-accent);border-color:var(--ds-accent);font-weight:600}
-  .quote{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-left:3px solid var(--ds-accent);
+  .quote{background:var(--ds-panel);border:1px solid var(--ds-border);border-left:3px solid var(--ds-accent);
     border-radius:8px;padding:11px 14px;color:var(--ds-text);font-size:14.5px;min-height:44px}
   .persons{display:flex;flex-direction:column;gap:9px;margin-top:14px}
   .person{display:flex;align-items:center;gap:11px;background:var(--ds-panel);border:1px solid var(--ds-border);
@@ -64,10 +64,28 @@
   .person .tag.co{color:var(--ds-accent-strong);background:var(--ds-accent-soft);border-color:var(--ds-accent-ring)}
   .person .tag.conf{color:var(--ds-muted);font-variant-numeric:tabular-nums}
   .empty{color:var(--ds-faint);font-size:13.5px;padding:6px 2px}
-  .perfline{margin-top:14px;padding-top:12px;border-top:1px solid var(--ds-border);
-    font-size:12.5px;color:var(--ds-muted);display:flex;gap:18px;flex-wrap:wrap}
-  .perfline b{color:var(--ds-accent-strong);font-weight:600;font-variant-numeric:tabular-nums}
-  .replay-note{font-size:12.5px;color:var(--ds-faint);margin-top:12px;line-height:1.5}
+  /* ---- 大卡片内的小卡片 ---- */
+  .subcard{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-radius:10px;
+    padding:14px 16px;margin-bottom:14px}
+  .subcard:last-child{margin-bottom:0}
+  .subcard h3{margin-bottom:10px}
+  /* ---- 管线执行轨迹（perfline 即 summary，展开看每步中间结果） ---- */
+  .trace{margin-top:14px;border-top:1px solid var(--ds-border)}
+  .trace summary{cursor:pointer;list-style:none;display:flex;gap:18px;flex-wrap:wrap;
+    align-items:baseline;padding-top:12px;font-size:12.5px;color:var(--ds-muted)}
+  .trace summary::-webkit-details-marker{display:none}
+  .trace summary b{color:var(--ds-accent-strong);font-weight:600;font-variant-numeric:tabular-nums}
+  .trace-hint{color:var(--ds-faint);font-size:12px;margin-left:auto}
+  .trace-hint::before{content:"▸ "}
+  .trace[open] .trace-hint::before{content:"▾ "}
+  .trace-body{margin-top:12px;display:flex;flex-direction:column;gap:11px;
+    font-size:12.5px;color:var(--ds-muted);line-height:1.75}
+  .trace-step b.stage{color:var(--ds-text);font-weight:600}
+  .trace-step .q{color:var(--ds-faint)}
+  .tcand{display:inline-block;background:var(--ds-panel);border:1px solid var(--ds-border);
+    border-radius:6px;padding:0 8px;margin:1px 2px;font-size:12px;color:var(--ds-text)}
+  .tnum{font-variant-numeric:tabular-nums;color:var(--ds-accent-strong);font-weight:600}
+  .demo-note{margin-top:20px;font-size:12.5px;line-height:1.65}
 
   /* ---- 推理模式二选一（选项列表） ---- */
   .mode-switch{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
@@ -181,45 +199,57 @@
         </div>
 
         <div class="card">
-          <h3>对话输入</h3>
-          <div class="mode-switch" role="radiogroup" aria-label="推理模式">
-            <button class="mode-opt active" id="mode-replay" role="radio" aria-checked="true">
-              <span class="opt-name">预录制回放</span>
-              <span class="opt-sub">真实 laya 跑出的固化结果 · 即点即看</span>
-            </button>
-            <button class="mode-opt" id="mode-live" role="radio" aria-checked="false">
-              <span class="opt-name">浏览器实时推理</span>
-              <span class="opt-sub">模型下载进你的浏览器，完全本地运行（~678MB）</span>
-            </button>
+          <div class="subcard">
+            <h3>对话输入</h3>
+            <div class="mode-switch" role="radiogroup" aria-label="推理模式">
+              <button class="mode-opt active" id="mode-replay" role="radio" aria-checked="true">
+                <span class="opt-name">预录制回放</span>
+                <span class="opt-sub">真实 laya 跑出的固化结果 · 即点即看</span>
+              </button>
+              <button class="mode-opt" id="mode-live" role="radio" aria-checked="false">
+                <span class="opt-name">浏览器实时推理</span>
+                <span class="opt-sub">模型下载进你的浏览器，完全本地运行（~678MB）</span>
+              </button>
+            </div>
+            <div class="live-progress" id="live-progress"></div>
+            <div class="live-input-row" id="live-input-row" style="display:none">
+              <input type="text" id="live-input" placeholder="输入任意座舱句子，如：主驾是我同事小李">
+              <button id="live-go">提取</button>
+            </div>
           </div>
-          <div class="live-progress" id="live-progress"></div>
-          <div class="live-input-row" id="live-input-row" style="display:none">
-            <input type="text" id="live-input" placeholder="输入任意座舱句子，如：主驾是我同事小李">
-            <button id="live-go">提取</button>
-          </div>
-          <h3 style="margin-top:6px">例句 · 按场景分类</h3>
-          <div class="cat-tabs" id="cat-tabs" role="tablist" aria-label="例句分类"></div>
-          <div class="cat-hint-line" id="cat-hint"></div>
-          <div id="examples"></div>
-          <div class="quote" id="quote">← 点上面任意例句</div>
 
-          <h3 style="margin-top:20px">提取结果</h3>
-          <div class="persons" id="persons"><div class="empty">等待选择例句…</div></div>
-
-          <div class="perfline" id="perfline">
-            <span title="端到端提取耗时：从输入到结构化输出。回放 = Apple M4 Pro 上 Python 管线的固化实测；实时 = 你的浏览器内 JS 管线实测（首条含预热）">延迟 <b id="m-lat">–</b></span>
-            <span title="代码层生成并通过否定门控的人名候选数（不进模型的品牌词/方位词已被姓氏过滤挡掉）">候选 <b id="m-cand">–</b></span>
-            <span title="第一轮模型问题数（强制选择 / 单人门控；0 = 介绍/品牌线索由代码直接判定，零模型调用）">选择轮问题 <b id="m-r1">–</b></span>
-            <span title="第二轮属性问题数（每个赢家 location + identity 两问）">属性轮问题 <b id="m-r2">–</b></span>
+          <div class="subcard">
+            <h3>例句 · 按场景分类</h3>
+            <div class="cat-tabs" id="cat-tabs" role="tablist" aria-label="例句分类"></div>
+            <div class="cat-hint-line" id="cat-hint"></div>
+            <div id="examples"></div>
+            <div class="quote" id="quote">← 点上面任意例句</div>
           </div>
-          <p class="replay-note">
-            ⚠️ 上方两种模式跑的是<b>同一套 v5 管线</b>（JS 移植，与 Python 输出 51 条对拍 <b>51/51 逐字节一致</b>），
-            区别只在推理发生的位置：<b>预录制回放</b> = 结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
-            （2026-10-23 已用 v5 管线逐条重跑）；<b>浏览器实时推理</b> = 模型（~678MB fp16，国内自动走 hf-mirror；
-            无持久缓存，每次启用需重新下载）下载进你的浏览器后完全本地推理——零服务器、零 token 成本、隐私不出浏览器。
-          </p>
+
+          <div class="subcard">
+            <h3>提取结果</h3>
+            <div class="persons" id="persons"><div class="empty">等待选择例句…</div></div>
+            <details class="trace" id="trace-box">
+              <summary>
+                <span title="端到端提取耗时：从输入到结构化输出。回放 = Apple M4 Pro 上 Python 管线的固化实测；实时 = 你的浏览器内 JS 管线实测（首条含预热）">延迟 <b id="m-lat">–</b></span>
+                <span title="代码层生成并通过否定门控的人名候选数（不进模型的品牌词/方位词已被姓氏过滤挡掉）">候选 <b id="m-cand">–</b></span>
+                <span title="第一轮模型问题数（强制选择 / 单人门控；0 = 介绍/品牌线索由代码直接判定，零模型调用）">选择轮 <b id="m-r1">–</b></span>
+                <span title="第二轮属性问题数（每个赢家 location + identity 两问）">属性轮 <b id="m-r2">–</b></span>
+                <span class="trace-hint">管线轨迹</span>
+              </summary>
+              <div class="trace-body" id="trace-body"></div>
+            </details>
+          </div>
         </div>
       </div>
+
+      <p class="sec-note demo-note">
+        ⚠️ 上方两种模式跑的是<b>同一套 v5 管线</b>（JS 移植，与 Python 输出 51 条对拍 <b>51/51 逐字节一致</b>），
+        区别只在推理发生的位置：<b>预录制回放</b> = 结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
+        （2026-10-23 已用 v5 管线逐条重跑）；<b>浏览器实时推理</b> = 模型（~678MB fp16，国内自动走 hf-mirror；
+        无持久缓存，每次启用需重新下载）下载进你的浏览器后完全本地推理——零服务器、零 token 成本、隐私不出浏览器。
+        「管线轨迹」展开可见每条例句的中间结果：候选生成、锚点判定（含模型概率）、增量扫描、属性问答与代码门控裁决。
+      </p>
     </section>
 
     <!-- ============ 评测结果 ============ -->
@@ -367,42 +397,15 @@ python demo/server.py                  # 启动时预加载模型，约 3-5s
 // ===== 2026-10-23 已用 v5 管线逐条重跑固化（winners = 人物判定路径与模型概率，
 // ===== intro_cue 为代码确定性判定、无模型概率）
 const REPLAY = [
- {"text":"副驾坐的是日产的小王","elapsed_ms":26.5,
-  "persons":[{"name":"小王","identity":"","location":"副驾","company":"日产"}],
-  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
-  "winners":[["小王",null,"brand_cue"]]},
- {"text":"司机王师傅在主驾","elapsed_ms":41.4,
-  "persons":[{"name":"王师傅","identity":"司机","location":"主驾","company":""}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},
-  "winners":[["王师傅",0.9349,"single_noul"]]},
- {"text":"副驾是我同事小刘","elapsed_ms":41.5,
-  "persons":[{"name":"小刘","identity":"同事","location":"副驾","company":""}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},
-  "winners":[["小刘",0.7261,"single_noul"]]},
- {"text":"我是陈部长，坐在主驾","elapsed_ms":26.2,
-  "persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],
-  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
-  "winners":[["陈部长",null,"intro_cue"]]},
- {"text":"副驾是我女儿小雨，后排左边是我儿子小宝","elapsed_ms":101.8,
-  "persons":[{"name":"小雨","identity":"","location":"副驾","company":""},
-             {"name":"小宝","identity":"","location":"后排左边","company":""}],
-  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":5},
-  "winners":[["小雨",0.6638,"forced"],["小宝",0.9531,"scan"]]},
- {"text":"后排坐着张总和王经理","elapsed_ms":108.9,
-  "persons":[{"name":"张总","identity":"","location":"后排","company":""},
-             {"name":"王经理","identity":"","location":"后排","company":""}],
-  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":4},
-  "winners":[["王经理",0.7967,"fallback"],["张总",0.6024,"fallback"]]},
- {"text":"我不是陈总，我叫陈部长，坐在主驾","elapsed_ms":33.6,
-  "persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],
-  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
-  "winners":[["陈部长",null,"intro_cue"]]},
- {"text":"车里没有人","elapsed_ms":0.0,"persons":[],
-  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},
-  "winners":[]},
- {"text":"帮我打开空调","elapsed_ms":0.0,"persons":[],
-  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},
-  "winners":[]}
+ {"text":"副驾坐的是日产的小王","elapsed_ms":26.5,"persons":[{"name":"小王","identity":"","location":"副驾","company":"日产"}],"perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},"winners":[["小王",null,"brand_cue"]],"trace":{"cands":["小王"],"excluded":[],"round1":{"path":"brand_cue","cue":"日产的","name":"小王"},"scan":[],"attrs":[{"name":"小王","loc":"副驾","loc_p":0.997,"id":"司机","id_p":0.9984}],"gates":[["id_evidence","小王","司机"],["company","小王","日产"]]}},
+ {"text":"司机王师傅在主驾","elapsed_ms":60.5,"persons":[{"name":"王师傅","identity":"司机","location":"主驾","company":""}],"perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},"winners":[["王师傅",0.9349,"single_noul"]],"trace":{"cands":["王师傅"],"excluded":[],"round1":{"path":"single_noul","name":"王师傅","p":0.9349},"scan":[],"attrs":[{"name":"王师傅","loc":"主驾","loc_p":1.0,"id":"司机","id_p":0.9997}],"gates":[]}},
+ {"text":"副驾是我同事小刘","elapsed_ms":52.0,"persons":[{"name":"小刘","identity":"同事","location":"副驾","company":""}],"perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},"winners":[["小刘",0.7261,"single_noul"]],"trace":{"cands":["小刘"],"excluded":[],"round1":{"path":"single_noul","name":"小刘","p":0.7261},"scan":[],"attrs":[{"name":"小刘","loc":"副驾","loc_p":0.9646,"id":"同事","id_p":0.9903}],"gates":[]}},
+ {"text":"我是陈部长，坐在主驾","elapsed_ms":26.5,"persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],"perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},"winners":[["陈部长",null,"intro_cue"]],"trace":{"cands":["陈部长"],"excluded":[],"round1":{"path":"intro_cue","cue":"我是","name":"陈部长"},"scan":[],"attrs":[{"name":"陈部长","loc":"主驾","loc_p":0.9999,"id":"司机","id_p":0.997}],"gates":[["id_evidence","陈部长","司机"]]}},
+ {"text":"副驾是我女儿小雨，后排左边是我儿子小宝","elapsed_ms":110.6,"persons":[{"name":"小雨","identity":"","location":"副驾","company":""},{"name":"小宝","identity":"","location":"后排左边","company":""}],"perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":5},"winners":[["小雨",0.6638,"forced"],["小宝",0.9531,"scan"]],"trace":{"cands":["小雨","小宝"],"excluded":[],"round1":{"path":"forced","winner":"小雨","p_win":0.6638,"accepted":true,"probs":[["小雨",0.6638],["没有人物",0.2484],["小宝",0.0878]]},"scan":[["小宝",0.9531]],"attrs":[{"name":"小雨","loc":"副驾","loc_p":0.7597,"id":"儿子","id_p":0.3754},{"name":"小宝","loc":"后排左边","loc_p":0.2448,"id":"孩子","id_p":0.522}],"gates":[["id_evidence","小雨","儿子"],["id_evidence","小宝","孩子"]]}},
+ {"text":"后排坐着张总和王经理","elapsed_ms":107.8,"persons":[{"name":"张总","identity":"","location":"后排","company":""},{"name":"王经理","identity":"","location":"后排","company":""}],"perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":4},"winners":[["王经理",0.7967,"fallback"],["张总",0.6024,"fallback"]],"trace":{"cands":["张总","王经理"],"excluded":[],"round1":{"path":"forced","winner":"没有人物","p_win":0.4831,"accepted":false,"probs":[["没有人物",0.4831],["张总",0.3388],["王经理",0.178]],"fallback":[["王经理",0.7967],["张总",0.6024]]},"scan":[],"attrs":[{"name":"王经理","loc":"后排","loc_p":0.4911,"id":"老板","id_p":0.6616},{"name":"张总","loc":"后排","loc_p":0.4485,"id":"老板","id_p":0.647}],"gates":[["id_evidence","王经理","老板"],["id_evidence","张总","老板"]]}},
+ {"text":"我不是陈总，我叫陈部长，坐在主驾","elapsed_ms":34.2,"persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],"perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},"winners":[["陈部长",null,"intro_cue"]],"trace":{"cands":["陈部长"],"excluded":[["陈总","前向否定线索"]],"round1":{"path":"intro_cue","cue":"我叫","name":"陈部长"},"scan":[],"attrs":[{"name":"陈部长","loc":"主驾","loc_p":1.0,"id":"司机","id_p":0.86}],"gates":[["id_evidence","陈部长","司机"]]}},
+ {"text":"车里没有人","elapsed_ms":0.0,"persons":[],"perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},"winners":[],"trace":{"cands":[],"excluded":[],"round1":{},"scan":[],"attrs":[],"gates":[]}},
+ {"text":"帮我打开空调","elapsed_ms":0.0,"persons":[],"perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},"winners":[],"trace":{"cands":[],"excluded":[],"round1":{},"scan":[],"attrs":[],"gates":[]}}
 ];
 
 // location 值 → 具体座位（对应 jev_extract.LOCATION_OPTIONS）
@@ -475,12 +478,61 @@ function renderPersons(persons, winners){
   }).join("");
 }
 
+// 管线执行轨迹渲染：数据来自管线埋点（PERF.trace）——回放模式取 REPLAY 固化值，
+// live 模式取浏览器管线实时输出，两侧结构一致（Python/JS 逐字段镜像）
+const GATE_LABELS = {title_split:"称谓拆分", id_evidence:"身份证据门·抑制", id_suffix:"身份后缀抑制",
+                     loc_evidence:"位置证据门·置空", loc_override:"位置绑定覆盖", company:"公司绑定"};
+const STEP_NUMS = ["①","②","③","④","⑤","⑥"];
+function renderTrace(t){
+  const box = $("trace-body");
+  if(!t){ box.innerHTML = ""; return; }
+  const steps = [];
+  let s1 = `<b class="stage">候选生成（代码层 · 0 问）</b>：` +
+    (t.cands && t.cands.length
+      ? t.cands.map(c=>`<span class="tcand">${esc(c)}</span>`).join("") +
+        ` <span class="q">姓氏/小X/阿X/称谓锚点过滤后进入模型；品牌词、方位词、功能词不生成人物候选</span>`
+      : `<span class="q">无人名候选 → 直接返回空（零模型调用）</span>`);
+  if (t.excluded && t.excluded.length)
+    s1 += `<br><span class="q">否定门控剔除：${t.excluded.map(([n,r])=>`${esc(n)}（${esc(r)}）`).join("、")}</span>`;
+  steps.push(s1);
+  const r1 = t.round1 || {};
+  if (r1.path === "intro_cue")
+    steps.push(`<b class="stage">人物锚点（介绍线索 · 0 模型问）</b>：原文「${esc(r1.cue)}」紧邻「${esc(r1.name)}」→ 自我介绍/介绍他人句式，代码直接判定为人物`);
+  else if (r1.path === "brand_cue")
+    steps.push(`<b class="stage">人物锚点（品牌线索 · 0 模型问）</b>：原文「${esc(r1.cue)}」紧邻「${esc(r1.name)}」→ 公司修饰人名句式，代码直接判定`);
+  else if (r1.path === "single_noul")
+    steps.push(`<b class="stage">人物锚点（单候选门控 · 1 模型问）</b>：<span class="q">「『${esc(r1.name)}』是这句话中提到的某个人物的名字或称呼」</span> → <span class="tnum">${(r1.p??0).toFixed(2)}</span> ${r1.p >= 0.5 ? "≥ 0.50，过门 ✓" : "< 0.50，拒绝 ✗"}`);
+  else if (r1.path === "forced") {
+    let fs = `<b class="stage">人物锚点（强制选择 · 1 模型问）</b>：<span class="q">「这句话中提到的某个人物的名字或称呼是哪个？」</span>全部候选进同一 softmax 竞争：<br>` +
+      (r1.probs||[]).map(([k,v])=>`${esc(k)} <span class="tnum">${v.toFixed(2)}</span>`).join(" · ");
+    if (r1.accepted)
+      fs += `<br>→ 赢家「${esc(r1.winner)}」<span class="tnum">${(r1.p_win??0).toFixed(2)}</span> ≥ 0.30 ✓`;
+    else if (r1.fallback)
+      fs += `<br>→ 无赢家 ≥ 0.30 且「没有人物」置信度 < 0.70（含糊）→ 回退普通扫描（${r1.fallback.length} 问）：` +
+            r1.fallback.map(([n,p])=>`${esc(n)} <span class="tnum">${p.toFixed(2)}</span> ✓`).join(" · ");
+    else
+      fs += `<br>→ 「没有人物」置信度 ≥ 0.70 → 判定无人物（负例路径）`;
+    steps.push(fs);
+  }
+  if (t.scan && t.scan.length)
+    steps.push(`<b class="stage">增量扫描（${t.scan.length} 模型问）</b>：<span class="q">「除了已提到的锚点，『X』也是这句话中的人物？」</span> → ` +
+      t.scan.map(([n,p])=>`${esc(n)} <span class="tnum">${p.toFixed(2)}</span> ✓`).join(" · "));
+  if (t.attrs && t.attrs.length)
+    steps.push(`<b class="stage">属性轮（${t.attrs.length * 2} 模型问）</b>：每个赢家问位置（13 选项）+ 身份（15 选项）：<br>` +
+      t.attrs.map(a => `${esc(a.name)} → 位置答「${esc(a.loc || "—")}」<span class="tnum">${(a.loc_p??0).toFixed(2)}</span> · 身份答「${esc(a.id || "—")}」<span class="tnum">${(a.id_p??0).toFixed(2)}</span>`).join("<br>"));
+  if (t.gates && t.gates.length)
+    steps.push(`<b class="stage">代码门控（0 问 · 裁决模型答案）</b>：<br>` +
+      t.gates.map(([ty,n,d]) => `${GATE_LABELS[ty]||ty}：${esc(n)}${d ? " ← " + esc(d) : ""}`).join("<br>"));
+  box.innerHTML = steps.map((s,i)=>`<div class="trace-step">${STEP_NUMS[i]||""} ${s}</div>`).join("");
+}
+
 function play(i){
   const d = REPLAY[i];
   document.querySelectorAll(".chip").forEach((c,k)=>c.classList.toggle("active",k===i));
   $("quote").textContent = d.text;
   renderPersons(d.persons, d.winners);
   renderCabin(d.persons);
+  renderTrace(d.trace);
   const pf = d.perf || {};
   $("m-lat").textContent  = d.elapsed_ms + " ms";
   $("m-cand").textContent = pf.n_candidates ?? "–";
@@ -637,6 +689,7 @@ async function livePlay(text, chipEl) {
     const r = await extract(text);
     renderPersons(r.persons, r.perf.winners);
     renderCabin(r.persons);
+    renderTrace(r.perf.trace);
     $m("m-lat").textContent = r.elapsedMs.toFixed(0) + " ms";
     $m("m-cand").textContent = r.perf.nCandidates;
     $m("m-r1").textContent = r.perf.nQ1;

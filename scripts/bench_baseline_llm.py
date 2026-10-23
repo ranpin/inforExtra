@@ -28,6 +28,9 @@ WARMUP = 3
 ROUNDS = 2
 CALL_GAP = float(os.getenv("BENCH_CALL_GAP", "1.0"))
 
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（git 历史加载的旧代码导入 model_config）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def load_old_extractor():
     """加载旧版 extract_entities_with_model（含巨型 prompt）。

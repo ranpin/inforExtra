@@ -416,15 +416,23 @@ def _cue_dedup(hits):
 
 
 def _intro_cued(text, cands):
-    """返回恰被介绍线索紧邻引导（线索止于候选起点）的唯一候选，否则 None。"""
-    hits = [c for c in cands
-            if any(text[max(0, c["start"] - len(cue)):c["start"]] == cue
-                   for cue in INTRO_CUES)]
-    return _cue_dedup(hits)
+    """返回 (候选, 线索文本)：恰有一个提及被介绍线索紧邻引导（线索止于候选
+    起点）时为该候选，否则 (None, None)。"""
+    hits = []
+    for c in cands:
+        for cue in INTRO_CUES:
+            if text[max(0, c["start"] - len(cue)):c["start"]] == cue:
+                hits.append((c, cue))
+                break
+    dedup = _cue_dedup([h[0] for h in hits])
+    if dedup is None:
+        return None, None
+    return next(h for h in hits if h[0] is dedup)
 
 
 def _brand_cued(text, cands):
-    """恰有一个候选被『[公司词]的』紧邻引导时返回该候选，否则 None。
+    """恰有一个候选被『[公司词]的』紧邻引导时返回 (该候选, 公司词)，否则
+    (None, None)。
 
     『小鹏的周平』『日产的小王』——公司词+的+候选 是确定性表层句法（该候选
     必是人物提及），同介绍线索方法论直接作锚点、跳过模型门控。与两用词清理
@@ -438,9 +446,12 @@ def _brand_cued(text, cands):
         for w in COMPANY_WORDS_BY_LEN:
             s = c["start"] - 1 - len(w)
             if s >= 0 and text[s:c["start"] - 1] == w:
-                hits.append(c)
+                hits.append((c, w))
                 break
-    return _cue_dedup(hits)
+    dedup = _cue_dedup([h[0] for h in hits])
+    if dedup is None:
+        return None, None
+    return next(h for h in hits if h[0] is dedup)
 
 
 # v5 规则6 位置文本证据绑定：原文中与人名确定性绑定的座位词优先于模型回答。
@@ -979,16 +990,28 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
     # --- 第 1 轮：锚点 ---
     anchor = None
     fallback_winners = None
-    intro = _intro_cued(user_input, cands)
-    brand = None if intro is not None else _brand_cued(user_input, cands)
+    # 管线执行轨迹（展示页「中间结果」展开用；纯埋点记录，不影响任何决策）
+    trace = PERF.get("trace")
+    if trace is None:
+        trace = PERF["trace"] = {"cands": [c["text"] for c in cands],
+                                 "excluded": [], "round1": {}, "scan": [],
+                                 "attrs": [], "gates": []}
+    trace_gates = []
+    intro, intro_cue = _intro_cued(user_input, cands)
+    brand, brand_word = (None, None) if intro is not None \
+        else _brand_cued(user_input, cands)
     t0 = time.perf_counter()
     try:
         if intro is not None:
             # v5 规则5：介绍线索紧邻 → 确定性锚点，跳过模型门控
             anchor = (intro, None)
+            trace["round1"] = {"path": "intro_cue", "cue": intro_cue,
+                               "name": intro["text"]}
         elif brand is not None:
             # v5 规则7：『[公司词]的』紧邻引导 → 确定性锚点（『小鹏的周平』）
             anchor = (brand, None)
+            trace["round1"] = {"path": "brand_cue", "cue": brand_word + "的",
+                               "name": brand["text"]}
         elif len(cands) == 1:
             c = cands[0]
             ans = backend.ask(user_input, {"pick_is": {
@@ -996,6 +1019,8 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
                 "instructions": f"『{c['text']}』是这句话中提到的某个人物的名字或称呼",
             }})
             p = (ans.get("pick_is") or {}).get("noul", 0.0)
+            trace["round1"] = {"path": "single_noul", "name": c["text"],
+                               "p": round(p, 4)}
             if p >= IS_PERSON_THRESHOLD:
                 anchor = (c, p)
         else:
@@ -1010,9 +1035,14 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
             win = pick.get("choice")
             probs = pick.get("probabilities") or {}
             p_win = probs.get(win, 0.0)
+            top = sorted(probs.items(), key=lambda kv: -kv[1])[:4]
+            trace["round1"] = {"path": "forced", "winner": win,
+                               "p_win": round(p_win, 4), "accepted": False,
+                               "probs": [[k, round(v, 4)] for k, v in top]}
             winner = next((c for c in cands if c["text"] == win), None)
             if winner is not None and win != FORCED_NO_PERSON and p_win >= FORCED_MIN_P:
                 anchor = (winner, p_win)
+                trace["round1"]["accepted"] = True
             elif probs.get(FORCED_NO_PERSON, 0.0) < NO_PERSON_CONFIDENT:
                 # 强制选择失败且『没有人物』置信度低（含糊）→ 普通 noul 扫描兜底。
                 # 实测多人句 forced 常以低置信度漏判（没有人物 0.62 vs
@@ -1031,11 +1061,14 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
                 for item in passed:
                     if not any(overlaps(item[0], k[0]) for k in fallback_winners):
                         fallback_winners.append(item)
+                trace["round1"]["fallback"] = [[c["text"], round(p, 4)]
+                                               for c, p in fallback_winners]
     except Exception as e:  # noqa: BLE001
         print(f"Jev 锚点轮失败: {e}")
     t_round1 = time.perf_counter() - t0
     n_q1 = 0 if (intro is not None or brand is not None) else 1
     if anchor is None and not fallback_winners:
+        trace["gates"] = trace_gates
         PERF.update({"t_round1": t_round1, "t_round2": 0.0,
                      "n_questions_r1": n_q1, "n_questions_r2": 0,
                      "winners": []})
@@ -1071,6 +1104,7 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
                     if not any(overlaps(item[0], k[0]) for k in winners):
                         winners.append(item)
                         winner_paths.append("scan")
+                trace["scan"] = [[c["text"], round(p, 4)] for c, p in passed]
             except Exception as e:  # noqa: BLE001
                 print(f"Jev 增量扫描失败: {e}")
             t_round2 = time.perf_counter() - t0
@@ -1083,6 +1117,9 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
     split_winners = []
     for c, p in winners:
         repl, suf = _title_split(cands, c)
+        if repl is not None:
+            trace_gates.append(["title_split", c["text"],
+                                f"{repl['text']} + 身份 {suf}"])
         if repl is None:
             suf = _following_title(user_input, c)
         split_winners.append((repl or c, p, suf))
@@ -1127,25 +1164,35 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
             attr = {}
         t_round2 += time.perf_counter() - t0
         n_q2 += 1 if task == "general" else 2
-        ident = _answer_value(attr, "id", "choice") or ""
-        ident = "" if ident == NO_IDENTITY else ident
+        id_raw = _answer_value(attr, "id", "choice") or ""
+        id_p = round(((attr.get("id") or {}).get("probabilities") or {})
+                     .get(id_raw, 0.0), 4)
+        ident = "" if id_raw == NO_IDENTITY else id_raw
         if not _identity_supported(user_input, c["text"], ident):
+            if ident:
+                trace_gates.append(["id_evidence", c["text"], ident])
             ident = ""
         # 拆分携带的身份证据优先（同学/老师 ∈ 选项表）；身份是名字自身
         # 后缀时按 gold 约定抑制（陈同学+同学 / 陈部长+部长 → 称谓留在名中，身份空）
         if suf and suf in id_options:
             ident = suf
         if ident and c["text"].endswith(ident):
+            trace_gates.append(["id_suffix", c["text"], ident])
             ident = ""
         if task == "general":
             others = [c2 for c2, _pw, _sf in split_winners if c2 is not c]
             rel = _relation_from_cues(user_input, c, others)
+            trace["attrs"].append({"name": c["text"], "id": id_raw,
+                                   "id_p": id_p, "rel": rel})
             persons.append({"name": c["text"], "identity": ident,
                             "relation": rel})
         else:
-            loc = _answer_value(attr, "loc", "choice") or ""
-            loc = "" if loc == NO_LOCATION else loc
+            loc_raw = _answer_value(attr, "loc", "choice") or ""
+            loc_p = round(((attr.get("loc") or {}).get("probabilities") or {})
+                          .get(loc_raw, 0.0), 4)
+            loc = "" if loc_raw == NO_LOCATION else loc_raw
             if loc and not loc_evidence:
+                trace_gates.append(["loc_evidence", c["text"], loc])
                 loc = ""
             if loc:
                 # v5 规则6：原文确定性绑定的座位词与模型回答冲突 → 覆盖。
@@ -1155,12 +1202,19 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
                 bound = _bound_loc_word(user_input, c, others)
                 g_bound = LOC_SEAT_GROUP.get(bound) if bound else None
                 if g_bound and LOC_SEAT_GROUP.get(loc) != g_bound:
+                    trace_gates.append(["loc_override", c["text"],
+                                        f"{loc}→{bound}"])
                     loc = bound
             # v5 规则7：公司/品牌就近绑定（确定性词表，零模型调用）
             company = _company_for(user_input, c,
                                    [c2 for c2, _pw, _sf in split_winners]) or ""
+            if company:
+                trace_gates.append(["company", c["text"], company])
+            trace["attrs"].append({"name": c["text"], "loc": loc_raw,
+                                   "loc_p": loc_p, "id": id_raw, "id_p": id_p})
             persons.append({"name": c["text"], "identity": ident,
                             "location": loc, "company": company})
+    trace["gates"] = trace_gates
     PERF.update({"t_round1": t_round1, "t_round2": t_round2,
                  "n_questions_r1": n_q1, "n_questions_r2": n_q2})
     persons.sort(key=lambda p: next(
@@ -1170,12 +1224,12 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
 
 def extract_entities(user_input):
     """与旧 extract_entities_with_model 相同的契约：输入文本，返回
-    {"persons": [{"name", "identity", "location"}]}。
+    {"persons": [{"name", "identity", "location", "company"}]}。
     """
     t_start = time.perf_counter()
     PERF.update({"n_candidates": 0, "n_questions_r1": 0, "n_chunks_r1": 0,
                  "n_questions_r2": 0, "t_candidates": 0.0, "t_round1": 0.0,
-                 "t_round2": 0.0, "t_total": 0.0, "winners": []})
+                 "t_round2": 0.0, "t_total": 0.0, "winners": [], "trace": {}})
     try:
         backend = get_backend()
     except Exception as e:  # noqa: BLE001
@@ -1183,14 +1237,20 @@ def extract_entities(user_input):
         return {"persons": []}
 
     t0 = time.perf_counter()
-    cands = generate_candidates(user_input)
+    raw_cands = generate_candidates(user_input)
     # 否定门控：被『不是/别叫我』引导的候选在代码层剔除，不进模型
-    cands = [c for c in cands if not _is_negated(user_input, c["text"])]
+    cands, fwd_neg = [], []
+    for c in raw_cands:
+        (fwd_neg if _is_negated(user_input, c["text"]) else cands).append(c)
     # v4 后向门控：人名后被缺席/纠正线索命中（『陈总不是我』『周老师没来』）的候选剔除
     back_neg = _backward_negated(user_input, cands)
+    excluded = [[c["text"], "前向否定线索"] for c in fwd_neg] + \
+               [[c["text"], "后向缺席线索"] for c in cands if c["id"] in back_neg]
     cands = [c for c in cands if c["id"] not in back_neg]
     PERF["t_candidates"] = time.perf_counter() - t0
     PERF["n_candidates"] = len(cands)
+    PERF["trace"] = {"cands": [c["text"] for c in cands], "excluded": excluded,
+                     "round1": {}, "scan": [], "attrs": [], "gates": []}
     if not cands:
         PERF["t_total"] = time.perf_counter() - t_start
         return {"persons": []}
@@ -1296,7 +1356,7 @@ def extract_entities_general(user_input):
     t_start = time.perf_counter()
     PERF.update({"n_candidates": 0, "n_questions_r1": 0, "n_chunks_r1": 0,
                  "n_questions_r2": 0, "t_candidates": 0.0, "t_round1": 0.0,
-                 "t_round2": 0.0, "t_total": 0.0, "winners": []})
+                 "t_round2": 0.0, "t_total": 0.0, "winners": [], "trace": {}})
     try:
         backend = get_backend()
     except Exception as e:  # noqa: BLE001
@@ -1304,12 +1364,18 @@ def extract_entities_general(user_input):
         return {"persons": []}
 
     t0 = time.perf_counter()
-    cands = generate_candidates(user_input)
-    cands = [c for c in cands if not _is_negated(user_input, c["text"])]
+    raw_cands = generate_candidates(user_input)
+    cands, fwd_neg = [], []
+    for c in raw_cands:
+        (fwd_neg if _is_negated(user_input, c["text"]) else cands).append(c)
     back_neg = _backward_negated(user_input, cands)
+    excluded = [[c["text"], "前向否定线索"] for c in fwd_neg] + \
+               [[c["text"], "后向缺席线索"] for c in cands if c["id"] in back_neg]
     cands = [c for c in cands if c["id"] not in back_neg]
     PERF["t_candidates"] = time.perf_counter() - t0
     PERF["n_candidates"] = len(cands)
+    PERF["trace"] = {"cands": [c["text"] for c in cands], "excluded": excluded,
+                     "round1": {}, "scan": [], "attrs": [], "gates": []}
     if not cands:
         PERF["t_total"] = time.perf_counter() - t_start
         return {"persons": []}

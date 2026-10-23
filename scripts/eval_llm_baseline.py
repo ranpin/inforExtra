@@ -39,6 +39,9 @@ CALL_GAP = float(os.getenv("EVAL_CALL_GAP", "1.0"))  # 平台 QPM 限流保护
 
 os.environ["OPENAI_EXTRACTION_MODEL"] = MODEL  # model_config 在 import 时读取
 
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（git 历史加载的旧 qwen_chat.py 导入 model_config）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # 从 git 历史加载旧管线模块（巨型 prompt 逐字一致）
 # ref 钉在 7bae5bb：extract_entities_with_model 已随 Jev 重构（668ef0b）从 main 移除
 _src = subprocess.run(["git", "show", "7bae5bb:qwen_chat.py"],

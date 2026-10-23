@@ -20,11 +20,11 @@
 复现命令（laya 最优配置）：
 ```bash
 JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
-  python process_test_set.py --skip-chat --out test/results/原始51_laya强制选择.xlsx --log test/results/原始51_laya强制选择_日志.txt
-python compare_results.py test/results/原始51_laya强制选择.xlsx
+  python scripts/process_test_set.py --skip-chat --out test/results/原始51_laya强制选择.xlsx --log test/results/原始51_laya强制选择_日志.txt
+python scripts/compare_results.py test/results/原始51_laya强制选择.xlsx
 ```
 
-**性能对比**（`BENCH_BACKEND=laya python bench_perf.py` / `python bench_perf.py` / `python bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/results/原始51_*_性能.json`）：
+**性能对比**（`BENCH_BACKEND=laya python scripts/bench_perf.py` / `python scripts/bench_perf.py` / `python scripts/bench_baseline_llm.py`，预热 3 条、正式 2 轮；原始数据 `test/results/原始51_*_性能.json`）：
 
 | 指标（同机 51 条） | 旧管线 Qwen2.5-Omni-7B（边车→平台） | open-jev（DeBERTa-v3-large，仅英文） | **laya-multilingual v4（mmBERT-base 322M）** |
 |---|---|---|---|
@@ -36,7 +36,7 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
 
 > 性能数字取自仓库内 `原始51_laya_性能.json`（v4 重跑，2026-10-21，git_commit `64b18a5`；meta 已补 `assembly=forced` 口径字段）。历史口径：v1 首跑 3.68s / 1425.1 条/分 / p95 0.052s；v3 重跑 3.98s / 1435.2 条/分 / p95 0.050s / p50 0.044s——v4 规则全为代码层修改（零新增前向），p50 三版一致 0.043~0.044s。上方准确率表为 **v1** 口径（对应 `原始51_laya强制选择.xlsx`）；v3 升到 F1 0.957，v4 进一步到 **F1 1.000、行级 50/50**（`原始51_laya强制选择v4.xlsx`），见下文「v4 规则优化」节。
 
-> **性能对集合选择不敏感（510 条交叉验证，2026-10-22）**：`BENCH_IN=test/测试集_扩充10x.xlsx BENCH_OUT=test/results/扩充510_laya_性能.json BENCH_BACKEND=laya python bench_perf.py` 实测 p50 **0.044s**（与 51 条 0.043s 一致）、p95 0.105s / 吞吐 1243.5 条/分（低于 51 条的 0.053s / 1427——510 集多人句占比更高，候选与扫描轮次更多）。性能载体仍用 51 条的原因：真实种子句，且旧管线 Qwen2.5-Omni-7B 复测需 13984 边车 + VPN（当前环境不可得），三列同集才构成同机可比。
+> **性能对集合选择不敏感（510 条交叉验证，2026-10-22）**：`BENCH_IN=test/测试集_扩充10x.xlsx BENCH_OUT=test/results/扩充510_laya_性能.json BENCH_BACKEND=laya python scripts/bench_perf.py` 实测 p50 **0.044s**（与 51 条 0.043s 一致）、p95 0.105s / 吞吐 1243.5 条/分（低于 51 条的 0.053s / 1427——510 集多人句占比更高，候选与扫描轮次更多）。性能载体仍用 51 条的原因：真实种子句，且旧管线 Qwen2.5-Omni-7B 复测需 13984 边车 + VPN（当前环境不可得），三列同集才构成同机可比。
 
 **结论**：
 - **laya-multilingual（mmBERT-base，Apache-2.0）+ 领域候选过滤 + 强制选择组装 = 比旧管线快 17 倍、人名 F1 0.936**，零样本、纯本地、零 token 成本。Jev 范式的性能主张（毫秒级、单前向）由 laya 在本地兑现
@@ -84,9 +84,9 @@ python compare_results.py test/results/原始51_laya强制选择.xlsx
 
 复现：
 ```bash
-python expand_test_set.py                                   # 生成 511 条 + gold + meta
-python eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边车
-python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
+python scripts/expand_test_set.py                                   # 生成 511 条 + gold + meta
+python scripts/eval_llm_baseline.py qwen3.8-flash-aliyun --no-thinking   # 需 13984 边车
+python scripts/compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx test/测试集_扩充10x_gold.xlsx
 ```
 
 > 注：`eval_llm_baseline.py` / `bench_baseline_llm.py` 加载的旧提取函数 `extract_entities_with_model` 已随 Jev 重构（668ef0b）从 main 移除，两脚本的 ref 已钉到重构前的 `7bae5bb`（commit e89252b），可直接复跑。
@@ -108,7 +108,7 @@ python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx tes
 - **真实否定 = 门控泛化缺口**：`_is_negated` 只匹配名字前 3 字内的 6 个固定线索；「别把我当成 / X不是我 / 并非 / 没来」全绕过。但 20 条里仍有 5 条被 laya 模型自身正确拒绝（「缺席 / 不来了」类），说明模型有部分否定判断力，是代码门控没覆盖全。
 - **ASR 噪声鲁棒（0.878）**：口语填充/重复不破坏表内人名提取 → 瓶颈在**词表覆盖**，不在模型对真实语音的适应力。
 
-复现：`.venv/bin/python eval_adversarial.py`（产物 `test/对抗集.xlsx` + `test/对抗集_gold.xlsx` + `test/results/对抗集_laya_v4.xlsx`；v3 预测仍留库中）。
+复现：`.venv/bin/python scripts/eval_adversarial.py`（产物 `test/对抗集.xlsx` + `test/对抗集_gold.xlsx` + `test/results/对抗集_laya_v4.xlsx`；v3 预测仍留库中）。
 
 > **v4 规则修复后**：合计 F1 0.474 → **0.907**（表外姓 0.000→0.824、真实否定 FP 15→1、ASR 噪声 0.878→1.000），规则与剩余留白见下文「v4 规则优化」节。
 
@@ -153,10 +153,10 @@ python compare_results.py test/results/扩充510_qwen3.8-flash关思考.xlsx tes
 
 复现：
 ```bash
-python compare_results.py test/results/扩充510_laya强制选择v4.xlsx test/测试集_扩充10x_gold.xlsx
-python compare_results.py test/results/原始51_laya强制选择v4.xlsx
-.venv/bin/python eval_adversarial.py        # → test/results/对抗集_laya_v4.xlsx
-.venv/bin/python fit_calibration.py         # → laya_calibration.json（分析产物，不接入管线）
+python scripts/compare_results.py test/results/扩充510_laya强制选择v4.xlsx test/测试集_扩充10x_gold.xlsx
+python scripts/compare_results.py test/results/原始51_laya强制选择v4.xlsx
+.venv/bin/python scripts/eval_adversarial.py        # → test/results/对抗集_laya_v4.xlsx
+.venv/bin/python scripts/fit_calibration.py       # → test/results/laya_calibration.json（分析产物，不接入管线，gitignore）
 ```
 
 ## 通用人物提取试点（v4③，2026-10-22）
@@ -185,7 +185,7 @@ python compare_results.py test/results/原始51_laya强制选择v4.xlsx
 
 座舱三集回归全保持（51 条 1.000 / 510 条 0.944 / 对抗集 0.907，共享代码改动零影响）。
 
-复现：`.venv/bin/python eval_general.py`（产物 `test/通用集.xlsx` + `test/通用集_gold.xlsx` + `test/results/通用集_laya_v4.xlsx`）。
+复现：`.venv/bin/python scripts/eval_general.py`（产物 `test/通用集.xlsx` + `test/通用集_gold.xlsx` + `test/results/通用集_laya_v4.xlsx`）。
 
 ## v5 规则优化 + 公司信息提取（2026-10-23）
 
@@ -219,13 +219,13 @@ python compare_results.py test/results/原始51_laya强制选择v4.xlsx
 复现：
 ```bash
 JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
-  python process_test_set.py --skip-chat --out test/results/原始51_laya强制选择v5.xlsx
-python compare_results.py test/results/原始51_laya强制选择v5.xlsx
+  python scripts/process_test_set.py --skip-chat --out test/results/原始51_laya强制选择v5.xlsx
+python scripts/compare_results.py test/results/原始51_laya强制选择v5.xlsx
 JEV_BACKEND=laya JEV_CANDIDATE_FILTER=surname JEV_ASSEMBLY=forced \
-  python process_test_set.py --in test/测试集_扩充10x.xlsx --skip-chat --out test/results/扩充510_laya强制选择v5.xlsx
-python compare_results.py test/results/扩充510_laya强制选择v5.xlsx test/测试集_扩充10x_gold.xlsx
-.venv/bin/python eval_adversarial.py   # → test/results/对抗集_laya_v5.xlsx
-.venv/bin/python eval_general.py       # → test/results/通用集_laya_v5.xlsx
+  python scripts/process_test_set.py --in test/测试集_扩充10x.xlsx --skip-chat --out test/results/扩充510_laya强制选择v5.xlsx
+python scripts/compare_results.py test/results/扩充510_laya强制选择v5.xlsx test/测试集_扩充10x_gold.xlsx
+.venv/bin/python scripts/eval_adversarial.py   # → test/results/对抗集_laya_v5.xlsx
+.venv/bin/python scripts/eval_general.py       # → test/results/通用集_laya_v5.xlsx
 ```
 
 ## 浏览器 live 推理（2026-10-23）

@@ -15,10 +15,13 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 import json  # noqa: E402
+import sys  # noqa: E402
 
 import laya  # noqa: E402
 import laya.calibrate  # noqa: E402
 
+# 脚本位于 scripts/ 下：仓库根保持在 sys.path（导入 jev_extract / compare_results）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import jev_extract  # noqa: E402
 from jev_extract import (  # noqa: E402
     FORCED_INSTRUCTIONS, FORCED_NO_PERSON, IDENTITY_OPTIONS, IDENTITY_QUESTION,
@@ -28,7 +31,7 @@ from compare_results import read_rows  # noqa: E402
 
 IN_FILE = "test/测试集_扩充10x.xlsx"
 GOLD_FILE = "test/测试集_扩充10x_gold.xlsx"
-OUT_FILE = "laya_calibration.json"
+OUT_FILE = "test/results/laya_calibration.json"
 MAX_SCAN_QUESTIONS = 4  # 每句二轮扫描式问题上限（控制单次前向规模）
 
 
