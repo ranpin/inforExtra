@@ -67,14 +67,24 @@
   .perfline b{color:var(--ds-accent-strong);font-weight:600;font-variant-numeric:tabular-nums}
   .replay-note{font-size:12.5px;color:var(--ds-faint);margin-top:12px;line-height:1.5}
 
-  /* ---- live 推理控件 ---- */
-  .live-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
-  .mode-badge{font-size:12px;color:var(--ds-muted);background:var(--ds-code-bg);border:1px solid var(--ds-border);
-    padding:3px 10px;border-radius:999px}
-  .mode-badge.live{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring);background:var(--ds-accent-soft);font-weight:600}
-  .live-btn{font-size:12.5px;color:#fff;background:var(--ds-accent);border:1px solid var(--ds-accent);
-    padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600}
-  .live-btn:disabled{opacity:.55;cursor:wait}
+  /* ---- 推理模式二选一（选项列表） ---- */
+  .mode-switch{display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .mode-opt{flex:1;min-width:210px;text-align:left;background:var(--ds-panel);border:1.5px solid var(--ds-border);
+    border-radius:10px;padding:10px 14px;cursor:pointer;font-family:inherit;transition:all .15s;
+    display:flex;flex-direction:column;gap:3px}
+  .mode-opt:hover{border-color:var(--ds-accent)}
+  .mode-opt.active{border-color:var(--ds-accent);background:var(--ds-accent-soft)}
+  .mode-opt .opt-name{font-size:13.5px;font-weight:700;color:var(--ds-text)}
+  .mode-opt.active .opt-name{color:var(--ds-accent-strong)}
+  .mode-opt .opt-sub{font-size:11.5px;color:var(--ds-muted);line-height:1.45}
+  .mode-opt:disabled{opacity:.6;cursor:wait}
+
+  /* ---- 例句按场景分类 ---- */
+  .example-group{margin-bottom:12px}
+  .example-group .examples{margin-bottom:0}
+  .example-cat{font-size:12px;font-weight:600;color:var(--ds-accent-strong);margin-bottom:7px}
+  .example-cat .cat-hint{font-weight:400;color:var(--ds-faint)}
+
   .live-progress{font-size:12px;color:var(--ds-faint);margin-bottom:12px;min-height:16px;line-height:1.5}
   .live-input-row{display:flex;gap:8px;margin-bottom:14px}
   .live-input-row input{flex:1;font-size:13.5px;color:var(--ds-text);background:var(--ds-panel);
@@ -166,16 +176,23 @@
 
         <div class="card">
           <h3>对话输入</h3>
-          <div class="live-row">
-            <span class="mode-badge" id="mode-badge">当前：预录回放</span>
-            <button class="live-btn" id="live-btn">启用浏览器实时推理</button>
+          <div class="mode-switch" role="radiogroup" aria-label="推理模式">
+            <button class="mode-opt active" id="mode-replay" role="radio" aria-checked="true">
+              <span class="opt-name">预录制回放</span>
+              <span class="opt-sub">真实 laya 跑出的固化结果 · 即点即看</span>
+            </button>
+            <button class="mode-opt" id="mode-live" role="radio" aria-checked="false">
+              <span class="opt-name">浏览器实时推理</span>
+              <span class="opt-sub">模型下载进你的浏览器，完全本地运行（~678MB）</span>
+            </button>
           </div>
           <div class="live-progress" id="live-progress"></div>
           <div class="live-input-row" id="live-input-row" style="display:none">
-            <input type="text" id="live-input" placeholder="输入任意座舱句子，如：副驾是我同事小李，主驾是我">
+            <input type="text" id="live-input" placeholder="输入任意座舱句子，如：主驾是我同事小李">
             <button id="live-go">提取</button>
           </div>
-          <div class="examples" id="examples"></div>
+          <h3 style="margin-top:6px">例句 · 按场景分类</h3>
+          <div id="examples"></div>
           <div class="quote" id="quote">← 点上面任意例句</div>
 
           <h3 style="margin-top:20px">提取结果</h3>
@@ -188,11 +205,10 @@
             <span>属性轮问题 <b id="m-r2">–</b></span>
           </div>
           <p class="replay-note">
-            ⚠️ 默认展示为<b>预录回放</b>：结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
-            （2026-10-22 已用 v4 管线逐条复核一致）。点上方「启用浏览器实时推理」：模型（~678MB fp16，
-            国内自动走 hf-mirror；无持久缓存，每次启用需重新下载）下载进你的浏览器后，同一套 v4 管线
-            （JS 移植，与 Python 输出 51 条对拍 50/51 逐字节一致）完全在你的浏览器内推理——
-            零服务器、零 token 成本、隐私不出浏览器。
+            ⚠️ 上方两种模式跑的是<b>同一套 v4 管线</b>（JS 移植，与 Python 输出 51 条对拍 50/51 逐字节一致），
+            区别只在推理发生的位置：<b>预录制回放</b> = 结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
+            （2026-10-22 已逐条复核一致）；<b>浏览器实时推理</b> = 模型（~678MB fp16，国内自动走 hf-mirror；
+            无持久缓存，每次启用需重新下载）下载进你的浏览器后完全本地推理——零服务器、零 token 成本、隐私不出浏览器。
           </p>
         </div>
       </div>
@@ -442,11 +458,46 @@ function play(i){
   $("m-r2").textContent   = pf.n_questions_r2 ?? "–";
 }
 
+// 例句场景分类（索引指向 REPLAY；各组按序拼接后 chip 的 DOM 顺序仍 = REPLAY 下标 0..8，
+// play() 里按 querySelectorAll(".chip") 序号定位 active 状态依然成立）
+const CATS = [
+  { label:"单人", hint:"身份提取 · 品牌词不误报 · 自我介绍", idx:[0,1,2,3] },
+  { label:"多人", hint:"一句话多人，分别绑定座位", idx:[4,5] },
+  { label:"否定 / 纠正", hint:"『我不是X』正确排除被否定项", idx:[6] },
+  { label:"无人物", hint:"负例正确返回空", idx:[7,8] },
+];
+
+// 推理模式："replay" | "live"；live 脚本（module）就绪后经 __livePlay 接管例句点击
+const MODE = { current:"replay" };
+window.__mode = MODE;
+window.__playReplay = play;
+
+function dispatch(i, chipEl){
+  if (MODE.current === "live" && window.__liveReady && window.__livePlay) {
+    window.__livePlay(REPLAY[i].text, chipEl);
+  } else {
+    play(i);
+  }
+}
+
 const exBox = $("examples");
-REPLAY.forEach((d,i) => {
-  const b = document.createElement("button");
-  b.className = "chip"; b.textContent = d.text; b.onclick = () => play(i);
-  exBox.appendChild(b);
+CATS.forEach(cat => {
+  const g = document.createElement("div");
+  g.className = "example-group";
+  const h = document.createElement("div");
+  h.className = "example-cat";
+  h.innerHTML = `${cat.label} <span class="cat-hint">· ${cat.hint}</span>`;
+  g.appendChild(h);
+  const row = document.createElement("div");
+  row.className = "examples";
+  cat.idx.forEach(i => {
+    const b = document.createElement("button");
+    b.className = "chip"; b.textContent = REPLAY[i].text;
+    b.onclick = () => dispatch(i, b);
+    row.appendChild(b);
+  });
+  g.appendChild(row);
+  exBox.appendChild(g);
 });
 play(1);   // 默认展示带身份提取的那条
 </script>
@@ -460,11 +511,39 @@ play(1);   // 默认展示带身份提取的那条
 import { loadModel, extract, backendInfo, MODEL_TOTAL_MB } from "./assets/laya-live.bundle.js";
 
 const $m = (id) => document.getElementById(id);
-const badge = $m("mode-badge"), btn = $m("live-btn"), prog = $m("live-progress");
-let liveReady = false;
+const prog = $m("live-progress");
+const optReplay = $m("mode-replay"), optLive = $m("mode-live");
+let liveReady = false, loading = false;
 
-async function enableLive() {
-  btn.disabled = true;
+// 经典脚本 chip 分发器的钩子：live 模式下例句点击经 __livePlay 走真实推理
+window.__liveReady = false;
+window.__livePlay = livePlay;
+
+function setOpts(mode){
+  optReplay.classList.toggle("active", mode === "replay");
+  optLive.classList.toggle("active", mode === "live");
+  optReplay.setAttribute("aria-checked", String(mode === "replay"));
+  optLive.setAttribute("aria-checked", String(mode === "live"));
+  $m("live-input-row").style.display = (mode === "live" && liveReady) ? "flex" : "none";
+}
+
+function replayStatus(){
+  prog.textContent = "预录回放：结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化（2026-10-22 已用 v4 管线逐条复核一致）。点例句即看。";
+}
+
+async function selectLive(){
+  if (liveReady){
+    window.__mode.current = "live";
+    setOpts("live");
+    const info = backendInfo() || {};
+    prog.textContent = `模型就绪（${info.backend || "?"}/${info.dtype || "?"}）——点例句或输入任意句子，推理完全在你的浏览器内完成（零服务器、零 token 成本）。`;
+    return;
+  }
+  if (loading) return;   // 下载进行中：loadModel 幂等，不重复触发
+  loading = true;
+  setOpts("live");
+  optLive.disabled = true;
+  optLive.querySelector(".opt-sub").textContent = "模型下载中…（可随时切回预录回放）";
   prog.textContent = `开始下载 laya-multilingual（~${MODEL_TOTAL_MB}MB fp16；国内自动走 hf-mirror；无持久缓存，每次启用需重新下载）…`;
   try {
     await loadModel((p) => {
@@ -473,21 +552,41 @@ async function enableLive() {
       }
     });
     liveReady = true;
+    window.__liveReady = true;
     const info = backendInfo() || {};
-    badge.textContent = `当前：浏览器实时推理 · ${info.backend || "?"}/${info.dtype || "?"}`;
-    badge.classList.add("live");
-    prog.textContent = "模型就绪——点例句或输入任意句子，推理完全在你的浏览器内完成（零服务器、零 token 成本）。";
-    btn.style.display = "none";
-    $m("live-input-row").style.display = "flex";
-    document.querySelectorAll(".chip").forEach((c, i) => {
-      c.onclick = () => livePlay(REPLAY[i].text, c);
-    });
+    if (optLive.classList.contains("active")) {
+      window.__mode.current = "live";
+      optLive.querySelector(".opt-sub").textContent = `已就绪 · ${info.backend || "?"}/${info.dtype || "?"} · 推理在你的浏览器内完成`;
+      prog.textContent = "模型就绪——点例句或输入任意句子，推理完全在你的浏览器内完成（零服务器、零 token 成本）。";
+      setOpts("live");
+    } else {
+      // 下载期间用户已切回预录回放：不强行接管，只告知就绪
+      optLive.querySelector(".opt-sub").textContent = `已就绪 · ${info.backend || "?"}/${info.dtype || "?"} · 点击切换`;
+      prog.textContent = "模型已就绪——随时切到「浏览器实时推理」即可使用。";
+    }
   } catch (e) {
-    prog.textContent = "加载失败：" + String((e && e.message) || e);
-    btn.disabled = false;
+    prog.textContent = "加载失败：" + String((e && e.message) || e) + "——已保持预录回放。";
+    optLive.querySelector(".opt-sub").textContent = "加载失败，可点击重试（~678MB）";
+    window.__mode.current = "replay";
+    setOpts("replay");
+  } finally {
+    loading = false;
+    optLive.disabled = false;
   }
 }
-btn.onclick = enableLive;
+
+function selectReplay(){
+  window.__mode.current = "replay";
+  setOpts("replay");
+  replayStatus();
+  const chips = [...document.querySelectorAll(".chip")];
+  const activeIdx = chips.findIndex(c => c.classList.contains("active"));
+  window.__playReplay(activeIdx >= 0 ? activeIdx : 1);
+}
+
+optReplay.onclick = selectReplay;
+optLive.onclick = selectLive;
+replayStatus();
 
 async function livePlay(text, chipEl) {
   if (!liveReady) return;
