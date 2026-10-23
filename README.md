@@ -32,13 +32,19 @@
 ## 演示 Demo
 
 - **在线展示页**（预录回放 + 可选浏览器实时推理——模型跑在访客浏览器里；座舱图可交互、例句按场景分类、管线轨迹可展开看每步中间结果）：<https://ranpin.github.io/jevCabin/>
-- **本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
+- **本地实时推理版**（`demo/`，支持任意输入、边打字边提取，debounce 350ms）：
 
 ```bash
-python demo/server.py   # 启动时预加载模型约 3-5s，然后打开 http://127.0.0.1:8000
+git clone https://github.com/ranpin/jevCabin.git && cd jevCabin
+pip install -r requirements.txt        # 含 laya / torch
+python demo/server.py                  # 启动时预加载模型约 3-5s，然后打开 http://127.0.0.1:8000
 ```
 
-`demo/` = server.py（后端，仅标准库 http.server）+ index.html（座舱俯视图，随输入实时点亮座位）；`docs/index.html` = 线上展示页（模型 322M 无法在静态页运行，故用真实推理结果固化）。
+  - 默认已置 laya 最优配置：`JEV_BACKEND=laya` `JEV_CANDIDATE_FILTER=surname` `JEV_ASSEMBLY=forced`
+  - HF 主站不可达的环境自动走本地缓存（`HF_HUB_OFFLINE=1`）
+  - demo 服务只用 Python 标准库 `http.server`，不引入额外 Web 框架依赖
+
+`demo/` = server.py（后端）+ index.html（座舱俯视图，随输入实时点亮座位）；`docs/index.html` = 线上展示页（模型 322M 无法在静态页运行，故用真实推理结果固化）。
 
 ## 快速开始
 

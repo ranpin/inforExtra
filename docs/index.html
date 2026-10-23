@@ -62,7 +62,6 @@
   .person .tag.loc{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring)}
   .person .tag.id{color:var(--ds-warn);border-color:var(--ds-warn-ring)}
   .person .tag.co{color:var(--ds-accent-strong);background:var(--ds-accent-soft);border-color:var(--ds-accent-ring)}
-  .person .tag.conf{color:var(--ds-muted);font-variant-numeric:tabular-nums}
   .empty{color:var(--ds-faint);font-size:13.5px;padding:6px 2px}
   /* ---- 大卡片内的小卡片 ---- */
   .subcard{background:var(--ds-code-bg);border:1px solid var(--ds-border);border-radius:10px;
@@ -359,26 +358,6 @@
       </p>
     </section>
 
-    <!-- ============ 本地运行 ============ -->
-    <section class="ds-section" id="run">
-      <h2 class="ds-h2">本地运行（实时推理版）</h2>
-      <p class="sec-note">仓库内的 <code>demo/</code> 是真实时推理版：支持任意输入、边打字边提取（debounce 350ms）。</p>
-      <div class="card">
-<pre><code>git clone https://github.com/ranpin/jevCabin.git
-cd jevCabin
-pip install -r requirements.txt        # 含 laya / torch
-
-python demo/server.py                  # 启动时预加载模型，约 3-5s
-# 浏览器打开 http://127.0.0.1:8000</code></pre>
-        <ul class="tight">
-          <li>默认已置 laya 最优配置：<code>JEV_BACKEND=laya</code> <code>JEV_CANDIDATE_FILTER=surname</code> <code>JEV_ASSEMBLY=forced</code></li>
-          <li>HF 主站不可达的环境会自动走本地缓存（<code>HF_HUB_OFFLINE=1</code>）</li>
-          <li>demo 服务只用 Python 标准库 <code>http.server</code>，不引入额外 Web 框架依赖</li>
-          <li>评测复现：<code>python scripts/compare_results.py test/results/扩充510_laya强制选择v5.xlsx test/测试集_扩充10x_gold.xlsx</code></li>
-        </ul>
-      </div>
-    </section>
-
     <footer class="ds-footer">
       jevCabin · 数据与代码见 <a href="https://github.com/ranpin/jevCabin">github.com/ranpin/jevCabin</a>
       · 本页 demo 默认预录回放，可选浏览器端实时推理（模型跑在访客浏览器内）
@@ -449,14 +428,7 @@ function renderCabin(persons){
         : "已点亮对应座位");
 }
 
-// 赢家判定路径 → 展示标签（置信度 = 该人物 is_person 判定的模型概率；
-// intro_cue 为代码确定性判定，无模型概率）
-const PATH_LABELS = {forced:"强制选择", scan:"增量扫描", single_noul:"单人门控",
-                     fallback:"回退扫描", intro_cue:"介绍线索", brand_cue:"品牌线索"};
-
-function renderPersons(persons, winners){
-  const wmap = {};
-  (winners || []).forEach(([n, p, path]) => { wmap[n] = [p, path]; });
+function renderPersons(persons){
   const box = $("persons");
   if(!persons.length){ box.innerHTML = '<div class="empty">未检测到人物（负例正确）</div>'; return; }
   box.innerHTML = persons.map(p => {
@@ -464,11 +436,7 @@ function renderPersons(persons, winners){
                            : '<span class="tag">位置未提及</span>';
     const id  = p.identity ? `<span class="tag id">${esc(p.identity)}</span>` : "";
     const co  = p.company ? `<span class="tag co" title="就近绑定的公司/品牌（代码词表匹配，零模型调用）">🏢 ${esc(p.company)}</span>` : "";
-    const w = wmap[p.name];
-    const conf = w
-      ? `<span class="tag conf" title="人物判定的来源路径与模型概率（is_person）">${PATH_LABELS[w[1]] || esc(w[1])}${w[0] != null ? " " + w[0].toFixed(2) : " · 代码判定"}</span>`
-      : "";
-    return `<div class="person"><span class="dot"></span><span class="name">${esc(p.name)}</span>${loc}${id}${co}${conf}</div>`;
+    return `<div class="person"><span class="dot"></span><span class="name">${esc(p.name)}</span>${loc}${id}${co}</div>`;
   }).join("");
 }
 
@@ -524,7 +492,7 @@ function play(i){
   const d = REPLAY[i];
   document.querySelectorAll(".chip").forEach((c,k)=>c.classList.toggle("active",k===i));
   $("quote").textContent = d.text;
-  renderPersons(d.persons, d.winners);
+  renderPersons(d.persons);
   renderCabin(d.persons);
   renderTrace(d.trace);
   const pf = d.perf || {};
@@ -681,7 +649,7 @@ async function livePlay(text, chipEl) {
   $m("persons").innerHTML = '<div class="empty">推理中…</div>';
   try {
     const r = await extract(text);
-    renderPersons(r.persons, r.perf.winners);
+    renderPersons(r.persons);
     renderCabin(r.persons);
     renderTrace(r.perf.trace);
     $m("m-lat").textContent = r.elapsedMs.toFixed(0) + " ms";
