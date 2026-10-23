@@ -187,6 +187,22 @@ python compare_results.py test/results/原始51_laya强制选择v4.xlsx
 
 复现：`.venv/bin/python eval_general.py`（产物 `test/通用集.xlsx` + `test/通用集_gold.xlsx` + `test/results/通用集_laya_v4.xlsx`）。
 
+## 浏览器 live 推理（2026-10-23）
+
+展示页新增「浏览器实时推理」模式（opt-in，预录回放保底）：laya-multilingual 完全跑在访客浏览器里（零服务器、零 token 成本、隐私不出浏览器）。
+
+**JS 管线移植对拍**（`web/pipeline.js` = jev_extract.py v4 逐函数移植）：
+- 确定性代码层（候选生成+否定门控）：51 条真实种子集 **51/51 逐句全一致**
+- 端到端（q8 332MB 本地自托管 + WebGPU）：51 条 **50/51 逐字节一致**；唯一分歧是阈值边界翻转且浏览器侧语义更对（『我右边坐的是日产的陈总』Python noul<0.5 漏检、浏览器 ≥0.5 正确提取）
+
+**模型源与托管**：HF repo `aac6fef/laya-multilingual-mlx`（fp16 ~678MB，Apache-2.0，revision 钉死 `f2b4faf`），URL 直连（`resolve/<commit>/` + Range 请求）+ hf.co 探活失败自动切 hf-mirror（国内可达，CORS 回显 Origin 已验证）。**不用 Hub repo ID 路径的原因**：Chromium Cache API 单条目上限实测在 200~300MB 之间（300/332/400/512MB put 全失败，quota 11.3GB 非瓶颈），643.8MB 的 model.safetensors 走 Hub 路径必炸；URL 路径绕过 Cache API，代价是无持久缓存（每次启用重新下载，页面已如实标注）。
+
+**量化对照**（bun + `laya quantize` 实测）：fp16 643.8MB → q8 332.2MB（51.6%，argmax 63/63 保持）→ q4 181.5MB（62/63，Δp 0.60）；q8 仍超 Cache API 上限，q4 或可缓存但质量有损——均留作未来自托管/上传 HF 的优化选项。
+
+**实测**（headless Chrome / WebGPU f16 / hf-mirror）：全量加载 678MB **25s**；例句 live 提取首调 311ms（含预热）、候选/问题数与预录一致；自由文本忠实复现 Python 行为含弱点（多人小X句 forced 高置信『没有人物』→ 两侧同空）。
+
+复现：`cd web && npm install && npm run dev`（对拍页 /parity.html）/ `npm run build`（bundle → docs/assets/）；对拍 gold = `web/public/parity51.json`（由 原始51_laya强制选择v4.xlsx 生成）。
+
 ## laya 库版本回归（0.3.17 → 0.4.12，2026-10-21）
 
 PyPI 上 laya 库已从 0.3.17 更新到 **0.4.12**（0.4 系列 2026-10-07 起发布：高基数 tournament 预测、短拉丁文本 router 修复、温度校准流程；**checkpoint 权重未变**——HF 仓库 10-03 提交仅 root config.json 元数据）。原 `laya>=0.3.17` pin 存在复现风险（新装会拉 0.4.12，而此前全部数字测自 0.3.17），故升级并做双集回归：

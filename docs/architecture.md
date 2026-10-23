@@ -100,6 +100,16 @@ OPEN_JEV_MODEL=com-kotobalabs/open-jev-deberta-v3-large   # 本地 open-jev（�
 - **⚠️ 诚实定位**：laya-multilingual **在通用 typed-decisions 基准上零样本近乎随机（0.342）**，模型卡明说「能力来自微调」。jevCabin 能做到 F1 0.944 **完全靠领域工程**（姓氏过滤 + 强制选择 + 证据/否定门控 + v4 规则优化），不是模型通用能力——这正是本项目的核心贡献；对抗子集 0.474 → 0.907（v4 修复后）进一步印证瓶颈在代码边界而非模型。
 - **最有价值的新发现——端侧变体**：社区已把 Laya 移植到多种端侧运行时——`litert-community/Laya-Multilingual-LiteRT`（Google LiteRT）、`AXERA-TECH/Laya`（爱芯元智边缘芯片），以及 GGUF / ONNX / CoreML / MXFP8 / MXFP4 / laya-browser。这为本项目「车机/嵌入式部署为未来工作」提供了现成路径（不必自己从头量化）。
 
+## 浏览器端部署（live demo，2026-10-23）
+
+展示页「浏览器实时推理」模式把整条提取管线跑在访客浏览器里（零服务器）：
+
+- **运行时**：[@johnhenry/laya](https://www.npmjs.com/package/@johnhenry/laya)（Apache-2.0，laya-mlx 的纯 TS 移植，WebGPU/CPU 后端）——实测浏览器与 Python laya 概率四位有效数字一致
+- **管线**：`web/pipeline.js` = jev_extract.py v4 的逐函数移植（候选生成/否定门控/强制选择/称谓拆分/证据门），51 条对拍 50/51 逐字节一致（详见[评测文档](evaluation.md)「浏览器 live 推理」节）
+- **模型源**：HF repo `aac6fef/laya-multilingual-mlx`（fp16 ~678MB，revision 钉死），URL 直连 + Range 请求；hf.co 探活失败自动切 hf-mirror（国内可达）
+- **关键约束**：Chromium Cache API 单条目上限实测在 200~300MB——643.8MB 模型无法走 Hub repo 缓存路径，只能 URL 直连（无持久缓存，每次启用重新下载）
+- **打包**：`web/build.mjs`（esbuild）→ `docs/assets/laya-live.bundle.js`（260KB，Apache NOTICE 内联）
+
 ## 已知可优化项（laya 侧，TODO）
 
 模型卡记录的两个 laya 固有坑，与本项目管线直接相关，值得后续处理：

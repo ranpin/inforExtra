@@ -23,6 +23,7 @@
 3. 提取范围限定：只对用户输入提取，不对模型回答二次提取；不提取地理地址
 4. 批量测试集处理与结果报告（P/R/F1 + 位置/身份 + 按模板族分解）
 5. 通用人物提取试点（v4③）：同一管线复用到通用对话（去座位、加说话人关系），滩头四族 F1 1.000——记忆系统提取阶段的候选原型
+6. 浏览器 live 推理（v4④）：展示页可选「浏览器实时推理」——模型下载进访客浏览器（HF 直连，国内自动 hf-mirror），JS 移植管线（与 Python 对拍 50/51 逐字节一致）完全本地推理，零服务器、零 token 成本
 
 ## 应用场景
 
@@ -30,7 +31,7 @@
 
 ## 演示 Demo
 
-- **在线展示页**（真实 laya 推理结果的预录回放，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
+- **在线展示页**（预录回放 + 可选浏览器实时推理——模型跑在访客浏览器里，座舱图可交互）：<https://ranpin.github.io/jevCabin/>
 - **本地实时推理版**（支持任意输入、边打字边提取，debounce 350ms）：
 
 ```bash
@@ -69,10 +70,13 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 
 ```
 ├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
+├── web/                    # 浏览器 live 推理（pipeline.js = jev_extract.py v4 逐函数移植、
+│                           #   live.js = HF 直连+hf-mirror 回退、parity.html = 51 条对拍 harness）
 ├── docs/
-│   ├── index.html          # 线上展示页（预录回放版，GitHub Pages 承载）
-│   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置）
-│   └── evaluation.md       # 完整评测（51/510 条、对抗子集、复现命令、产物清单）
+│   ├── index.html          # 线上展示页（预录回放 + 可选浏览器实时推理，GitHub Pages 承载）
+│   ├── assets/             # laya-live.bundle.js（esbuild 打包产物，260KB）
+│   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置、浏览器端部署）
+│   └── evaluation.md       # 完整评测（51/510 条、对抗子集、浏览器 live 对拍、复现命令、产物清单）
 ├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
 │                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控）
 ├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
