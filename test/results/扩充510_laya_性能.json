@@ -1,11 +1,11 @@
 {
   "meta": {
-    "date": "2026-10-22 16:48:45",
+    "date": "2026-10-23 17:58:41",
     "backend": "laya",
     "machine": "arm64",
     "cpu": "Apple M4 Pro",
     "python": "3.13.13",
-    "git_commit": "8fd6f5f",
+    "git_commit": "67f4ac9",
     "model": "convaiinnovations/laya/multilingual",
     "in_file": "test/测试集_扩充10x.xlsx",
     "candidate_filter": "surname",
@@ -16,22 +16,22 @@
   "suites": [
     {
       "variant": "laya",
-      "load_seconds": 5.65,
+      "load_seconds": 7.54,
       "n_utterances": 1022,
-      "wall_seconds": 49.3,
-      "throughput_per_min": 1243.5,
-      "latency_p50_s": 0.044,
-      "latency_p95_s": 0.105,
-      "latency_mean_s": 0.048,
+      "wall_seconds": 39.3,
+      "throughput_per_min": 1561.9,
+      "latency_p50_s": 0.027,
+      "latency_p95_s": 0.103,
+      "latency_mean_s": 0.038,
       "stage_mean_s": {
         "t_candidates": 0.0,
-        "t_round1": 0.018,
-        "t_round2": 0.03
+        "t_round1": 0.009,
+        "t_round2": 0.029
       },
       "mean_candidates": 1.2,
-      "mean_questions_r1": 0.9,
+      "mean_questions_r1": 0.4,
       "mean_chunks_r1": 0,
-      "peak_rss_gb": 1.74
+      "peak_rss_gb": 2.1
     }
   ],
   "scaling": {
@@ -43,7 +43,7 @@
           "chunks": 1
         },
         "16": {
-          "mean_s": 0.127,
+          "mean_s": 0.126,
           "chunks": 1
         }
       }

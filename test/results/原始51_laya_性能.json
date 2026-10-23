@@ -1,12 +1,13 @@
 {
   "meta": {
-    "date": "2026-10-21 21:52:44",
+    "date": "2026-10-23 17:46:11",
     "backend": "laya",
     "machine": "arm64",
     "cpu": "Apple M4 Pro",
     "python": "3.13.13",
-    "git_commit": "64b18a5",
+    "git_commit": "67f4ac9",
     "model": "convaiinnovations/laya/multilingual",
+    "in_file": "test/测试集.xlsx",
     "candidate_filter": "surname",
     "assembly": "forced",
     "warmup": 3,
@@ -15,22 +16,22 @@
   "suites": [
     {
       "variant": "laya",
-      "load_seconds": 4.41,
+      "load_seconds": 6.03,
       "n_utterances": 102,
-      "wall_seconds": 4.3,
-      "throughput_per_min": 1427.1,
-      "latency_p50_s": 0.043,
-      "latency_p95_s": 0.053,
-      "latency_mean_s": 0.042,
+      "wall_seconds": 3.2,
+      "throughput_per_min": 1934.5,
+      "latency_p50_s": 0.028,
+      "latency_p95_s": 0.051,
+      "latency_mean_s": 0.031,
       "stage_mean_s": {
         "t_candidates": 0.0,
-        "t_round1": 0.016,
-        "t_round2": 0.026
+        "t_round1": 0.004,
+        "t_round2": 0.027
       },
       "mean_candidates": 1.0,
-      "mean_questions_r1": 0.9,
+      "mean_questions_r1": 0.2,
       "mean_chunks_r1": 0,
-      "peak_rss_gb": 2.99
+      "peak_rss_gb": 2.12
     }
   ],
   "scaling": {
@@ -38,7 +39,7 @@
       "state": "副驾是日产的小陈同学",
       "by_questions": {
         "8": {
-          "mean_s": 0.073,
+          "mean_s": 0.078,
           "chunks": 1
         }
       }
