@@ -211,3 +211,7 @@ __marimo__/
 
 # laya 温度校准拟合产物（fit_calibration.py 生成，可用 JEV_LAYA_CALIBRATION 显式加载）
 laya_calibration.json
+
+# web/ live 推理开发产物（npm 依赖与开发用模型软链；生产模型走 HF repo，不入库）
+web/node_modules/
+web/public/models/

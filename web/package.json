@@ -1,0 +1,26 @@
+{
+  "name": "jevcabin-web",
+  "version": "0.1.0",
+  "description": "jevCabin 浏览器 live 推理：jev_extract.py v4 的 JS 移植 + laya-multilingual q8",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite --port 5174",
+    "build": "node build.mjs",
+    "parity": "vite --port 5174"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@johnhenry/backend-webgpu": "^0.5.1",
+    "@johnhenry/laya": "^0.3.2",
+    "@johnhenry/laya-cli": "^0.3.1",
+    "esbuild": "^0.28.2"
+  },
+  "devDependencies": {
+    "vite": "^8.3.5"
+  },
+  "private": "true",
+  "type": "module"
+}

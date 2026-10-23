@@ -67,6 +67,23 @@
   .perfline b{color:var(--ds-accent-strong);font-weight:600;font-variant-numeric:tabular-nums}
   .replay-note{font-size:12.5px;color:var(--ds-faint);margin-top:12px;line-height:1.5}
 
+  /* ---- live 推理控件 ---- */
+  .live-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  .mode-badge{font-size:12px;color:var(--ds-muted);background:var(--ds-code-bg);border:1px solid var(--ds-border);
+    padding:3px 10px;border-radius:999px}
+  .mode-badge.live{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring);background:var(--ds-accent-soft);font-weight:600}
+  .live-btn{font-size:12.5px;color:#fff;background:var(--ds-accent);border:1px solid var(--ds-accent);
+    padding:6px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600}
+  .live-btn:disabled{opacity:.55;cursor:wait}
+  .live-progress{font-size:12px;color:var(--ds-faint);margin-bottom:12px;min-height:16px;line-height:1.5}
+  .live-input-row{display:flex;gap:8px;margin-bottom:14px}
+  .live-input-row input{flex:1;font-size:13.5px;color:var(--ds-text);background:var(--ds-panel);
+    border:1px solid var(--ds-border);border-radius:8px;padding:8px 12px;font-family:inherit}
+  .live-input-row input:focus{outline:none;border-color:var(--ds-accent)}
+  .live-input-row button{font-size:13px;color:#fff;background:var(--ds-accent);border:1px solid var(--ds-accent);
+    border-radius:8px;padding:8px 16px;cursor:pointer;font-family:inherit;font-weight:600}
+  .live-input-row button:disabled{opacity:.55;cursor:wait}
+
   /* ---- 表格 ---- */
   .tbl-wrap{overflow-x:auto;border:1px solid var(--ds-border);border-radius:10px;background:var(--ds-panel)}
   table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:640px}
@@ -149,6 +166,15 @@
 
         <div class="card">
           <h3>对话输入</h3>
+          <div class="live-row">
+            <span class="mode-badge" id="mode-badge">当前：预录回放</span>
+            <button class="live-btn" id="live-btn">启用浏览器实时推理</button>
+          </div>
+          <div class="live-progress" id="live-progress"></div>
+          <div class="live-input-row" id="live-input-row" style="display:none">
+            <input type="text" id="live-input" placeholder="输入任意座舱句子，如：副驾是我同事小李，主驾是我">
+            <button id="live-go">提取</button>
+          </div>
           <div class="examples" id="examples"></div>
           <div class="quote" id="quote">← 点上面任意例句</div>
 
@@ -162,9 +188,11 @@
             <span>属性轮问题 <b id="m-r2">–</b></span>
           </div>
           <p class="replay-note">
-            ⚠️ 本页为<b>预录回放</b>：以上结果均由真实 laya 模型在 Apple M4 Pro 上跑出后固化，
-            非浏览器端实时推理（模型 322M，无法在静态页运行）。
-            要跑真实时推理版（支持任意输入、边打字边提取），见下方「本地运行」。
+            ⚠️ 默认展示为<b>预录回放</b>：结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
+            （2026-10-22 已用 v4 管线逐条复核一致）。点上方「启用浏览器实时推理」：模型（~678MB fp16，
+            国内自动走 hf-mirror；无持久缓存，每次启用需重新下载）下载进你的浏览器后，同一套 v4 管线
+            （JS 移植，与 Python 输出 51 条对拍 50/51 逐字节一致）完全在你的浏览器内推理——
+            零服务器、零 token 成本、隐私不出浏览器。
           </p>
         </div>
       </div>
@@ -305,7 +333,7 @@ python demo/server.py                  # 启动时预加载模型，约 3-5s
 
     <footer class="ds-footer">
       jevCabin · 数据与代码见 <a href="https://github.com/ranpin/jevCabin">github.com/ranpin/jevCabin</a>
-      · 本页 demo 为真实推理结果的预录回放
+      · 本页 demo 默认预录回放，可选浏览器端实时推理（模型跑在访客浏览器内）
     </footer>
   </div>
 
@@ -421,6 +449,74 @@ REPLAY.forEach((d,i) => {
   exBox.appendChild(b);
 });
 play(1);   // 默认展示带身份提取的那条
+</script>
+
+<script type="module">
+// ===== live 推理集成（web/live.js 的打包产物 docs/assets/laya-live.bundle.js）=====
+// 模型源：HF repo aac6fef/laya-multilingual-mlx（fp16 ~678MB，Apache-2.0，revision 钉死）。
+// URL 直连 + Range 请求——Chromium Cache API 单条目上限实测在 200~650MB 之间，
+// 643MB 的模型文件放不进去（Hub repo 路径必炸），故走无缓存的 URL 路径；
+// hf.co 探活失败自动切 hf-mirror（国内可达）。每次启用需重新下载。
+import { loadModel, extract, backendInfo, MODEL_TOTAL_MB } from "./assets/laya-live.bundle.js";
+
+const $m = (id) => document.getElementById(id);
+const badge = $m("mode-badge"), btn = $m("live-btn"), prog = $m("live-progress");
+let liveReady = false;
+
+async function enableLive() {
+  btn.disabled = true;
+  prog.textContent = `开始下载 laya-multilingual（~${MODEL_TOTAL_MB}MB fp16；国内自动走 hf-mirror；无持久缓存，每次启用需重新下载）…`;
+  try {
+    await loadModel((p) => {
+      if (p && p.loaded !== undefined) {
+        prog.textContent = `下载中 ${p.file || ""} 累计 ${(p.loaded / 1e6).toFixed(0)} / ~${MODEL_TOTAL_MB} MB`;
+      }
+    });
+    liveReady = true;
+    const info = backendInfo() || {};
+    badge.textContent = `当前：浏览器实时推理 · ${info.backend || "?"}/${info.dtype || "?"}`;
+    badge.classList.add("live");
+    prog.textContent = "模型就绪——点例句或输入任意句子，推理完全在你的浏览器内完成（零服务器、零 token 成本）。";
+    btn.style.display = "none";
+    $m("live-input-row").style.display = "flex";
+    document.querySelectorAll(".chip").forEach((c, i) => {
+      c.onclick = () => livePlay(REPLAY[i].text, c);
+    });
+  } catch (e) {
+    prog.textContent = "加载失败：" + String((e && e.message) || e);
+    btn.disabled = false;
+  }
+}
+btn.onclick = enableLive;
+
+async function livePlay(text, chipEl) {
+  if (!liveReady) return;
+  document.querySelectorAll(".chip").forEach((c) => c.classList.toggle("active", c === chipEl));
+  $m("quote").textContent = text;
+  $m("persons").innerHTML = '<div class="empty">推理中…</div>';
+  try {
+    const r = await extract(text);
+    renderPersons(r.persons);
+    renderCabin(r.persons);
+    $m("m-lat").textContent = r.elapsedMs.toFixed(0) + " ms";
+    $m("m-cand").textContent = r.perf.nCandidates;
+    $m("m-r1").textContent = r.perf.nQ1;
+    $m("m-r2").textContent = r.perf.nQ2;
+  } catch (e) {
+    $m("persons").innerHTML = '<div class="empty">推理失败：' + String((e && e.message) || e) + "</div>";
+  }
+}
+
+const inp = $m("live-input"), go = $m("live-go");
+async function liveGo() {
+  const t = inp.value.trim();
+  if (!t || !liveReady) return;
+  go.disabled = true;
+  await livePlay(t, null);
+  go.disabled = false;
+}
+go.onclick = liveGo;
+inp.addEventListener("keydown", (e) => { if (e.key === "Enter") liveGo(); });
 </script>
 </body>
 </html>
