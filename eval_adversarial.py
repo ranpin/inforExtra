@@ -9,7 +9,7 @@ v4 规则优化（2026-10-21）后：族1 F1 0.824（生僻姓/阿X/称谓后缀
 余 6FN 为设计内排除）、族2 FP 15→1、族3 1.000，合计 F1 0.474→0.907。
 
 gold 由构造时确定（构造即标注）。指标 = 人名级 P/R/F1（与主评测同口径）。
-产物：test/对抗集.xlsx（输入）/ test/对抗集_gold.xlsx（gold）/ test/results/对抗集_laya_v4.xlsx（预测）
+产物：test/对抗集.xlsx（输入）/ test/对抗集_gold.xlsx（gold）/ test/results/对抗集_laya_v5.xlsx（预测）
 用法：.venv/bin/python eval_adversarial.py
 """
 import os
@@ -151,8 +151,8 @@ def main():
     wb = openpyxl.Workbook(); ws = wb.active; ws.title = "预测"
     ws.append(["族", "用户输入", "gold", "预测"])
     for row in all_rows: ws.append(list(row))
-    wb.save("test/results/对抗集_laya_v4.xlsx")
-    print("\n产物已写入 test/对抗集.xlsx, test/对抗集_gold.xlsx, test/results/对抗集_laya_v4.xlsx")
+    wb.save("test/results/对抗集_laya_v5.xlsx")
+    print("\n产物已写入 test/对抗集.xlsx, test/对抗集_gold.xlsx, test/results/对抗集_laya_v5.xlsx")
 
 
 if __name__ == "__main__":

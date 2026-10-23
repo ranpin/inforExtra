@@ -1,14 +1,14 @@
 /**
  * jevCabin 提取管线 JS 移植（浏览器 live 推理用）。
  *
- * 与 jev_extract.py（v4）逐函数对应：常量、候选生成、否定门控、锚点强制
- * 选择、增量扫描、称谓拆分、身份/位置证据门全部按行移植；唯一结构差异是
- * 后端适配层 askLaya（对应 Python LayaBackend.ask 的 noul→A/B 中性键改写）。
- * agent 由外部注入（@johnhenry/laya 的 load() 产物），本文件零依赖、
- * 可在 Node 用 mock agent 单测确定性部分。
+ * 与 jev_extract.py（v5）逐函数对应：常量、候选生成、否定门控、介绍线索锚点、
+ * 锚点强制选择、增量扫描、称谓拆分、身份证据门、位置文本证据绑定全部按行
+ * 移植；唯一结构差异是后端适配层 askLaya（对应 Python LayaBackend.ask 的
+ * noul→A/B 中性键改写）。agent 由外部注入（@johnhenry/laya 的 load() 产物），
+ * 本文件零依赖、可在 Node 用 mock agent 单测确定性部分。
  *
  * 对拍验证：51 条真实种子集 persons 与 Python 管线输出逐条一致
- * （test/results/原始51_laya强制选择v4.xlsx 为 gold）。
+ * （gold = web/public/parity51.json，由 v5 管线产物生成）。
  */
 
 // ---------------------------------------------------------------- 常量（与 jev_extract.py 逐字一致）
@@ -20,7 +20,7 @@ export const FORCED_MAX_PERSONS = 5;
 export const MAX_CANDIDATES = 60;
 
 /** 每次调用的统计（镜像 Python PERF；live.js 读取供页面展示）。 */
-export const PERF = { nCandidates: 0, nQ1: 0, nQ2: 0 };
+export const PERF = { nCandidates: 0, nQ1: 0, nQ2: 0, winners: [] };
 
 export const FORCED_NO_PERSON = "没有人物";
 export const FORCED_INSTRUCTIONS =
@@ -87,6 +87,34 @@ export const ABSENCE_CUES = [
   "不在车上", "没上车", "没来", "不来", "缺席", "不是我", "是别人",
 ];
 export const ABSENCE_MAX_GAP = 8;
+
+// v5 规则5 介绍线索锚点（与 Python INTRO_CUES 逐字一致）：『我是/我叫/这是…』
+// 紧邻候选时直接作为人物锚点、跳过模型门控（laya 对自我介绍句中小X类名字
+// noul 系统性低分：『我是小张，坐在副驾』0.4407 < 0.5 漏检）。
+export const INTRO_CUES = [
+  "我是", "我叫", "叫我", "喊我", "称呼我", "我的名字是",
+  "这是", "那是", "他叫", "她叫", "他是", "她是",
+];
+
+// v5 规则6 位置文本证据绑定（与 Python LOC_SEAT_GROUP/绑定规则逐字一致）：
+// 原文中与人名确定性绑定的座位词优先于模型回答（laya 左右系统性混淆：
+// 『后排左边是我女儿小雨』答 后排右边 0.307 > 后排左边 0.189）。
+export const LOC_SEAT_GROUP = {
+  "主驾": "driver", "主驾驶": "driver", "驾驶位": "driver",
+  "副驾": "passenger", "副驾驶": "passenger",
+  "后排左边": "rear-left", "左后": "rear-left", "左后座": "rear-left",
+  "后排左": "rear-left",
+  "后排右边": "rear-right", "右后": "rear-right", "右后座": "rear-right",
+  "后排右": "rear-right",
+};
+export const LOC_TEXT_WORDS = [
+  ...Object.keys(LOC_SEAT_GROUP).sort((a, b) => b.length - a.length),
+  "前排", "后排", "左边", "右边",
+];
+export const LOC_BIND_MAX_GAP = 8;
+export const LOC_BIND_STOP = "。！？；!?;";
+export const LOC_FWD_CONNECT = ["是", "坐", "在"];
+export const LOC_BACK_CONNECT = ["在", "坐"];
 
 // ---------------------------------------------------------------- 候选生成
 
@@ -155,7 +183,20 @@ export function generateCandidates(text) {
         && cleaned.some((o) => o.text === t.slice(0, -1) && o.start === c.start)) continue;
     final.push(c);
   }
-  return final.slice(0, MAX_CANDIDATES);
+  // v5 公司名包含清理：候选严格包含于更长公司词出现时剔除（阿里 ⊂ 阿里巴巴）；
+  // 小米/小鹏 等两用词无更长公司词包含，不受影响
+  const compSpans = companySpans(text);
+  const kept = compSpans.length
+    ? final.filter((c) => !compSpans.some(([ws, we]) =>
+        ws <= c.start && c.end <= we && we - ws > c.end - c.start))
+    : final;
+  // v5 规则7 两用词公司义清理：公司词候选后紧跟「的+另一候选」（小鹏的周平）
+  // → 公司义优先，剔除人物候选；我是小鹏 / 小鹏和小王 不匹配，人物义保留
+  const companySet = new Set(COMPANY_WORDS);
+  const out = kept.filter((c) => !(companySet.has(c.text)
+    && text.slice(c.end, c.end + 1) === "的"
+    && kept.some((o) => o !== c && o.start === c.end + 1)));
+  return out.slice(0, MAX_CANDIDATES);
 }
 
 // ---------------------------------------------------------------- 门控与拆分
@@ -225,6 +266,167 @@ export function identitySupported(text, name, identity) {
   return window.includes(identity);
 }
 
+export function cueDedup(hits) {
+  if (!hits.length) return null;
+  if (new Set(hits.map((c) => c.start)).size !== 1) return null;
+  let best = hits[0];
+  for (const c of hits) if (c.end > best.end) best = c;
+  return best;
+}
+
+export function introCued(text, cands) {
+  const hits = cands.filter((c) => INTRO_CUES.some(
+    (cue) => text.slice(Math.max(0, c.start - cue.length), c.start) === cue));
+  return cueDedup(hits);
+}
+
+export function brandCued(text, cands) {
+  const hits = [];
+  for (const c of cands) {
+    if (text.slice(Math.max(0, c.start - 1), c.start) !== "的") continue;
+    for (const w of COMPANY_WORDS_BY_LEN) {
+      const s = c.start - 1 - w.length;
+      if (s >= 0 && text.slice(s, c.start - 1) === w) {
+        hits.push(c);
+        break;
+      }
+    }
+  }
+  return cueDedup(hits);
+}
+
+export function locOccurrences(text) {
+  const occ = [];
+  let i = 0;
+  while (i < text.length) {
+    let matched = false;
+    for (const w of LOC_TEXT_WORDS) {
+      if (text.startsWith(w, i)) {
+        occ.push([i, i + w.length, w]);
+        i += w.length;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) i += 1;
+  }
+  return occ;
+}
+
+export function boundLocWord(text, cand, others) {
+  const regionOk = (a, b) => {
+    for (const ch of text.slice(a, b)) {
+      if (LOC_BIND_STOP.includes(ch)) return false;
+    }
+    for (const o of others) {
+      let p = text.indexOf(o.text);
+      while (p >= 0) {
+        if (p < b && p + o.text.length > a) return false;
+        p = text.indexOf(o.text, p + 1);
+      }
+    }
+    return true;
+  };
+  let best = null; // [gap, word]
+  for (const [s, e, w] of locOccurrences(text)) {
+    if (e <= cand.start) { // 前向绑定
+      const gap = cand.start - e;
+      if (gap <= LOC_BIND_MAX_GAP && regionOk(e, cand.start)
+          && (gap === 0 || LOC_FWD_CONNECT.some(
+            (k) => text.slice(e, cand.start).includes(k)))
+          && (best === null || gap < best[0])) best = [gap, w];
+    } else if (s >= cand.end) { // 后向绑定
+      const gap = s - cand.end;
+      if (gap <= LOC_BIND_MAX_GAP && regionOk(cand.end, s)
+          && LOC_BACK_CONNECT.some((k) => text.slice(cand.end, s).includes(k))
+          && (best === null || gap < best[0])) best = [gap, w];
+    }
+  }
+  return best ? best[1] : null;
+}
+
+// v5 规则7 公司/品牌信息提取（与 Python COMPANY_WORDS/绑定规则逐字一致）：
+// 确定性词表 + 就近绑定，零模型调用。防误绑三道闸：品牌出现与任何赢家人名
+// 重叠不绑（『我是小鹏』）；窗口跨越其他赢家出现不绑（『日产的小王和小李』
+// 不给小李绑日产）；gap>0 时窗口须含连接词（『小王和吉利』不绑）。
+export const COMPANY_WORDS = [
+  // 汽车整车（合资/自主/新势力）
+  "日产", "吉利", "比亚迪", "特斯拉", "宝马", "奔驰", "奥迪", "大众",
+  "丰田", "本田", "理想", "蔚来", "小鹏", "长城", "奇瑞", "沃尔沃",
+  "马自达", "福特", "现代", "起亚", "零跑", "哪吒", "极氪", "问界",
+  "智界", "享界", "领克", "坦克", "五菱", "红旗", "捷豹", "路虎",
+  "保时捷", "雷克萨斯", "凯迪拉克", "别克", "雪佛兰", "斯巴鲁",
+  "三菱", "标致", "雪铁龙", "斯柯达", "英菲尼迪", "宾利",
+  "劳斯莱斯", "法拉利", "兰博基尼", "迈巴赫",
+  // 汽车供应链/智驾
+  "博世", "采埃孚", "宁德时代", "地平线", "黑芝麻", "亿咖通",
+  "德赛西威", "均胜电子", "禾赛", "速腾聚创", "图达通", "Momenta",
+  // 互联网/科技
+  "阿里巴巴", "阿里", "腾讯", "百度", "华为", "小米", "字节跳动",
+  "字节", "美团", "京东", "网易", "滴滴", "拼多多", "快手",
+  "哔哩哔哩", "大疆", "商汤", "旷视", "科大讯飞", "联想", "海尔",
+  "格力", "微软", "谷歌", "苹果", "亚马逊", "英伟达", "英特尔",
+  "高通", "三星", "台积电", "大众点评",
+];
+// 长度降序 + 字典序（确定性迭代，与 Python sorted(key=(-len, w)) 一致）
+export const COMPANY_WORDS_BY_LEN = [...new Set(COMPANY_WORDS)]
+  .sort((a, b) => b.length - a.length || (a < b ? -1 : a > b ? 1 : 0));
+export const COMPANY_BIND_MAX_GAP = 4;
+export const COMPANY_CONNECT = ["的", "是", "在", "来自", "属于"];
+
+export function companySpans(text) {
+  const spans = [];
+  for (const w of COMPANY_WORDS_BY_LEN) {
+    let p = text.indexOf(w);
+    while (p >= 0) {
+      spans.push([p, p + w.length]);
+      p = text.indexOf(w, p + 1);
+    }
+  }
+  return spans;
+}
+
+export function companyFor(text, cand, winners) {
+  const nameSpans = [];
+  for (const w of winners) {
+    let p = text.indexOf(w.text);
+    while (p >= 0) {
+      nameSpans.push([p, p + w.text.length]);
+      p = text.indexOf(w.text, p + 1);
+    }
+  }
+  const bindable = (a, b, fwd, gap) => {
+    if (gap > COMPANY_BIND_MAX_GAP) return false;
+    if ([...text.slice(a, b)].some((ch) => LOC_BIND_STOP.includes(ch))) return false;
+    if (nameSpans.some(([ns, ne]) => ns < b && ne > a)) return false;
+    if (!(fwd && gap === 0)
+        && !COMPANY_CONNECT.some((k) => text.slice(a, b).includes(k))) return false;
+    return true;
+  };
+  let best = null; // [gap, rank, word]；rank: 前向0 后向1
+  for (const word of COMPANY_WORDS_BY_LEN) {
+    let p = text.indexOf(word);
+    while (p >= 0) {
+      const e = p + word.length;
+      if (!nameSpans.some(([ns, ne]) => p < ne && e > ns)) {
+        if (e <= cand.start) {
+          const gap = cand.start - e;
+          if (bindable(e, cand.start, true, gap)
+              && (best === null || gap < best[0]
+                  || (gap === best[0] && 0 < best[1]))) best = [gap, 0, word];
+        } else if (p >= cand.end) {
+          const gap = p - cand.end;
+          if (bindable(cand.end, p, false, gap)
+              && (best === null || gap < best[0]
+                  || (gap === best[0] && 1 < best[1]))) best = [gap, 1, word];
+        }
+      }
+      p = text.indexOf(word, p + 1);
+    }
+  }
+  return best ? best[2] : null;
+}
+
 // ---------------------------------------------------------------- 后端适配（对应 LayaBackend.ask）
 
 /** noul→A/B 中性键 choice 改写（laya issue #156 workaround），P(A) 映射回 noul 概率。 */
@@ -264,10 +466,19 @@ export async function askLaya(agent, state, questions) {
 export async function extractForced(agent, userInput, cands) {
   PERF.nQ1 = 0;
   PERF.nQ2 = 0;
+  PERF.winners = [];
   let anchor = null;
   let fallbackWinners = null;
+  const intro = introCued(userInput, cands);
+  const brand = intro !== null ? null : brandCued(userInput, cands);
   try {
-    if (cands.length === 1) {
+    if (intro !== null) {
+      // v5 规则5：介绍线索紧邻 → 确定性锚点，跳过模型门控
+      anchor = [intro, null];
+    } else if (brand !== null) {
+      // v5 规则7：『[公司词]的』紧邻引导 → 确定性锚点（『小鹏的周平』）
+      anchor = [brand, null];
+    } else if (cands.length === 1) {
       const c = cands[0];
       const ans = await askLaya(agent, userInput, {
         pick_is: {
@@ -313,17 +524,22 @@ export async function extractForced(agent, userInput, cands) {
   } catch (e) {
     console.warn("Jev 锚点轮失败:", e);
   }
-  PERF.nQ1 = 1;
+  PERF.nQ1 = (intro !== null || brand !== null) ? 0 : 1;
   // 注意：Python `if fallback_winners:` 对空列表为假——JS 空数组为真，须显式判 length
   if (anchor === null && (!fallbackWinners || fallbackWinners.length === 0)) {
     return { persons: [] };
   }
 
   let winners;
+  let winnerPaths;
   if (fallbackWinners && fallbackWinners.length) {
     winners = fallbackWinners.slice(0, FORCED_MAX_PERSONS);
+    winnerPaths = winners.map(() => "fallback");
   } else {
     winners = [anchor];
+    winnerPaths = [intro !== null ? "intro_cue"
+      : (brand !== null ? "brand_cue"
+        : (cands.length === 1 ? "single_noul" : "forced"))];
     // 第 2 轮：增量 noul 扫描剩余候选（带锚点上下文）
     const aCand = anchor[0];
     const rest = cands.filter((c) => c.text !== aCand.text && !overlaps(c, aCand));
@@ -342,7 +558,10 @@ export async function extractForced(agent, userInput, cands) {
         passed = passed.filter(([, p]) => p >= IS_PERSON_THRESHOLD);
         passed.sort((a, b) => b[1] - a[1]);
         for (const item of passed) {
-          if (!winners.some((k) => overlaps(item[0], k[0]))) winners.push(item);
+          if (!winners.some((k) => overlaps(item[0], k[0]))) {
+            winners.push(item);
+            winnerPaths.push("scan");
+          }
         }
       } catch (e) {
         console.warn("Jev 增量扫描失败:", e);
@@ -350,6 +569,7 @@ export async function extractForced(agent, userInput, cands) {
       PERF.nQ2 = rest.length;
     }
     winners = winners.slice(0, FORCED_MAX_PERSONS);
+    winnerPaths = winnerPaths.slice(0, FORCED_MAX_PERSONS);
   }
 
   // v4 称谓后缀拆分：陈同学 → 小陈 + 身份证据 同学（仅当原文存在止于称谓起点的重叠候选）
@@ -359,6 +579,7 @@ export async function extractForced(agent, userInput, cands) {
     if (repl === null) suf = followingTitle(userInput, c);
     splitWinners.push([repl || c, p, suf]);
   }
+  PERF.winners = splitWinners.map(([c, p], i) => [c.text, p, winnerPaths[i]]);
 
   // v4 位置文本证据门（宽松版）：原文无任何位置词时位置回答必是幻觉
   const locEvidence = LOCATION_OPTIONS.some(
@@ -397,7 +618,17 @@ export async function extractForced(agent, userInput, cands) {
     let loc = ((attr.loc || {}).choice) || "";
     loc = loc === NO_LOCATION ? "" : loc;
     if (loc && !locEvidence) loc = "";
-    persons.push({ name: c.text, identity: ident, location: loc });
+    if (loc) {
+      // v5 规则6：原文确定性绑定的座位词与模型回答冲突 → 覆盖（含区域级粗答）；
+      // 同座异名（右后→右后座）保留模型答案
+      const others = splitWinners.filter(([c2]) => c2 !== c).map(([c2]) => c2);
+      const bound = boundLocWord(userInput, c, others);
+      const gBound = bound ? LOC_SEAT_GROUP[bound] : undefined;
+      if (gBound && LOC_SEAT_GROUP[loc] !== gBound) loc = bound;
+    }
+    // v5 规则7：公司/品牌就近绑定（确定性词表，零模型调用）
+    const company = companyFor(userInput, c, splitWinners.map(([c2]) => c2)) || "";
+    persons.push({ name: c.text, identity: ident, location: loc, company });
   }
   persons.sort((a, b) => {
     const ca = cands.find((c) => c.text === a.name);
@@ -417,6 +648,7 @@ export async function extractEntities(agent, userInput) {
   if (!cands.length) {
     PERF.nQ1 = 0;
     PERF.nQ2 = 0;
+    PERF.winners = [];
     return { persons: [] };
   }
   return extractForced(agent, userInput, cands);

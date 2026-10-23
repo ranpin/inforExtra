@@ -2,7 +2,7 @@
 
 > 🎬 **在线 Demo**：<https://ranpin.github.io/jevCabin/>
 
-车载座舱智能助手，专为汽车座舱场景设计：对话回答通过 OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B；**信息提取使用 Jev 类型化决策模型**（本地 Laya 后端），从对话中抽取车内人员信息（姓名/身份）和座位位置并格式化输出。
+车载座舱智能助手，专为汽车座舱场景设计：对话回答通过 OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B；**信息提取使用 Jev 类型化决策模型**（本地 Laya 后端），从对话中抽取车内人员信息（姓名/身份/公司品牌）和座位位置并格式化输出。
 
 核心思路：用类型化决策模型（单次前向返回校准概率、不生成任何文本）替代旧版「约 2000 token 巨型 prompt + LLM 生成 JSON + 字符串切割解析」——结构化输出错误率按构造为 0，每个判定带可按场景调节的置信度。
 
@@ -10,20 +10,20 @@
 
 零样本、纯本地、零 token 成本（Apple M4 Pro / MPS）：
 
-- **人名 F1 0.944**（510 条扩充集，laya v4；原始 51 条 v4 F1 1.000、行级 50/50）
+- **人名 F1 0.964**（510 条扩充集，laya v5，追平 qwen3.8-flash；原始 51 条 F1 1.000、行级 50/50）
 - **单条延迟 p50 0.043s、吞吐 1427 条/分钟**——比旧管线（p50 0.745s）**快 17 倍**
-- **诚实边界**：分布外对抗子集（表外姓/真实否定/ASR 噪声）F1 0.474 → v4 规则修复后 **0.907**；余困难负例 FP 属 laya 零样本判别上限（微调可解）
+- **诚实边界**：分布外对抗子集（表外姓/真实否定/ASR 噪声）F1 0.474 → v5 规则修复后 **0.921**；余困难负例 FP 属 laya 零样本判别上限（微调可解）
 
-📊 完整评测（51 条 / 510 条 / 对抗子集、按模板族分解、v1→v4 工程修复、全部复现命令）→ **[docs/evaluation.md](docs/evaluation.md)**
+📊 完整评测（51 条 / 510 条 / 对抗子集、按模板族分解、v1→v5 工程修复、全部复现命令）→ **[docs/evaluation.md](docs/evaluation.md)**
 
 ## 功能特点
 
 1. 对话问答：OpenAI 兼容 API 调用 Qwen-2.5-Omni-7B（可指向本地边车服务）
-2. 结构化提取：Jev（System One 决策模型）完成车内人员/位置提取，人员与位置关联显示
+2. 结构化提取：Jev（System One 决策模型）完成车内人员/位置/公司品牌提取（v5 新增 company 字段：~90 词汽车/互联网公司词典 + 就近绑定，零模型调用），人员与位置关联显示
 3. 提取范围限定：只对用户输入提取，不对模型回答二次提取；不提取地理地址
 4. 批量测试集处理与结果报告（P/R/F1 + 位置/身份 + 按模板族分解）
 5. 通用人物提取试点（v4③）：同一管线复用到通用对话（去座位、加说话人关系），滩头四族 F1 1.000——记忆系统提取阶段的候选原型
-6. 浏览器 live 推理（v4④）：展示页可选「浏览器实时推理」——模型下载进访客浏览器（HF 直连，国内自动 hf-mirror），JS 移植管线（与 Python 对拍 50/51 逐字节一致）完全本地推理，零服务器、零 token 成本
+6. 浏览器 live 推理：展示页可选「浏览器实时推理」——模型下载进访客浏览器（HF 直连，国内自动 hf-mirror），JS 移植管线（与 Python 对拍 51/51 逐字节一致）完全本地推理，零服务器、零 token 成本
 
 ## 应用场景
 
@@ -70,7 +70,7 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 
 ```
 ├── demo/                   # 实时推理 demo（server.py 后端 + index.html 座舱交互前端）
-├── web/                    # 浏览器 live 推理（pipeline.js = jev_extract.py v4 逐函数移植、
+├── web/                    # 浏览器 live 推理（pipeline.js = jev_extract.py v5 逐函数移植、
 │                           #   live.js = HF 直连+hf-mirror 回退、parity.html = 51 条对拍 harness）
 ├── docs/
 │   ├── index.html          # 线上展示页（预录回放 + 可选浏览器实时推理，GitHub Pages 承载）
@@ -78,7 +78,8 @@ JEV_BACKEND=dryrun python jev_extract.py     # 只打印将发送的问题结构
 │   ├── architecture.md     # 信息提取架构详解（Jev 三原语、四步管线、后端配置、浏览器端部署）
 │   └── evaluation.md       # 完整评测（51/510 条、对抗子集、浏览器 live 对拍、复现命令、产物清单）
 ├── jev_extract.py          # 类型化决策提取管线核心（typesafe/laya/openjev/dryrun 四后端，
-│                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控）
+│                           #   fanout/forced 两种组装模式，姓氏候选过滤，否定/身份/位置证据门控，
+│                           #   v5：介绍/品牌线索锚点 + 位置文本绑定 + 公司品牌提取）
 ├── qwen_chat.py            # 交互模式主入口：LLM 对话回答 + Jev/Laya 信息提取
 ├── model_config.py         # OpenAI 兼容客户端配置（对话模型，默认指向 13984 边车）
 ├── process_test_set.py     # 批量评测（--in/--out/--log/--skip-chat）

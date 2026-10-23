@@ -260,6 +260,25 @@ def generate_candidates(text):
                         for o in cleaned)):
             continue
         final.append(c)
+    # v5 公司名包含清理：『阿里巴巴的小张』的 阿里 会按阿X昵称模式生成人物
+    # 候选（实测误报成人物、且其名字区间会挡住公司绑定）——候选严格包含于
+    # 更长公司词出现时剔除。小米/小鹏 等人名/公司两用词无更长公司词包含，不受影响
+    comp_spans = _company_spans(text)
+    if comp_spans:
+        final = [c for c in final
+                 if not any(ws <= c["start"] and c["end"] <= we
+                            and we - ws > c["end"] - c["start"]
+                            for ws, we in comp_spans)]
+    # v5 规则7 两用词公司义清理：公司词候选后紧跟「的+另一候选」（『小鹏的周平』）
+    # 时公司义优先，剔除该人物候选——510 集 4 条『小鹏的X』行实测 小鹏 既成人物
+    # FP（gold 只有 X）又挡住公司绑定；『我是小鹏』『小鹏和小王』不匹配模式，
+    # 人物义保留
+    company_set = set(COMPANY_WORDS)
+    final = [c for c in final
+             if not (c["text"] in company_set
+                     and text[c["end"]:c["end"] + 1] == "的"
+                     and any(o["start"] == c["end"] + 1
+                             for o in final if o is not c))]
     return final[:MAX_CANDIDATES]
 
 
@@ -373,6 +392,219 @@ def _backward_negated(text, cands):
                         negated.add(c["id"])
             start = q + 1
     return negated
+
+
+# ---------------------------------------------------------------- v5 弱点修复
+# v5 规则5 介绍线索锚点：『我是/我叫/这是/他叫…』紧邻候选时直接作为人物锚点，
+# 跳过模型门控（同否定门控方法论：确定性表层句法由代码处理）。根因：laya 对
+# 自我介绍句中的『小X』类名字 noul 系统性低分——实测『我是小张，坐在副驾』
+# noul 0.4407 < 0.5 漏检，而同句位置问题 0.9995 全对（人物门是唯一失效环节）。
+# 否定门控先行（『我不是X』『别叫我X』的 X 已被剔除），与本规则不冲突；
+# 恰有一个候选被线索紧邻时才生效，多个命中视为歧义、交回模型裁决。
+INTRO_CUES = ("我是", "我叫", "叫我", "喊我", "称呼我", "我的名字是",
+              "这是", "那是", "他叫", "她叫", "他是", "她是")
+
+
+def _cue_dedup(hits):
+    """线索命中去歧义：同一起点的多个命中（田子 ⊂ 田子涵）是同一提及的
+    不同写法，取最长者；命中跨多个起点才是真歧义，返回 None 交回模型裁决。"""
+    if not hits:
+        return None
+    if len({c["start"] for c in hits}) != 1:
+        return None
+    return max(hits, key=lambda c: c["end"])
+
+
+def _intro_cued(text, cands):
+    """返回恰被介绍线索紧邻引导（线索止于候选起点）的唯一候选，否则 None。"""
+    hits = [c for c in cands
+            if any(text[max(0, c["start"] - len(cue)):c["start"]] == cue
+                   for cue in INTRO_CUES)]
+    return _cue_dedup(hits)
+
+
+def _brand_cued(text, cands):
+    """恰有一个候选被『[公司词]的』紧邻引导时返回该候选，否则 None。
+
+    『小鹏的周平』『日产的小王』——公司词+的+候选 是确定性表层句法（该候选
+    必是人物提及），同介绍线索方法论直接作锚点、跳过模型门控。与两用词清理
+    配套：小鹏 已按公司义从候选剔除，但若剩余唯一候选走单候选 noul 门会因
+    『X的Y』句式低分漏检（实测 周平 <0.5），本规则兜住该路径。
+    """
+    hits = []
+    for c in cands:
+        if text[max(0, c["start"] - 1):c["start"]] != "的":
+            continue
+        for w in COMPANY_WORDS_BY_LEN:
+            s = c["start"] - 1 - len(w)
+            if s >= 0 and text[s:c["start"] - 1] == w:
+                hits.append(c)
+                break
+    return _cue_dedup(hits)
+
+
+# v5 规则6 位置文本证据绑定：原文中与人名确定性绑定的座位词优先于模型回答。
+# 根因：laya 位置 choice 对左右系统性混淆——实测『后排左边是我女儿小雨』答
+# 后排右边 0.307 > 后排左边 0.189，证据词就在原文逐字出现。
+# 只在「绑定词与模型回答都是座位级且属不同座位」时覆盖：不动区域级回答、
+# 模型判『未提及』时不补填（避免与否定句/自我介绍 gold 位置为空的约定冲突）、
+# 同座异名（右后→右后座）保留模型答案（gold 允许同义映射，51 集实测 2 行）。
+LOC_SEAT_GROUP = {
+    "主驾": "driver", "主驾驶": "driver", "驾驶位": "driver",
+    "副驾": "passenger", "副驾驶": "passenger",
+    "后排左边": "rear-left", "左后": "rear-left", "左后座": "rear-left",
+    "后排左": "rear-left",
+    "后排右边": "rear-right", "右后": "rear-right", "右后座": "rear-right",
+    "后排右": "rear-right",
+}
+# 原文扫描词表：座位级（含同义变体）+ 区域级（区域词只参与绑定检测，不触发覆盖）。
+# 按长度降序贪心匹配——『后排左边』不会再被拆成『后排』+『左边』两个词。
+LOC_TEXT_WORDS = tuple(sorted(LOC_SEAT_GROUP, key=len, reverse=True)) + (
+    "前排", "后排", "左边", "右边")
+LOC_BIND_MAX_GAP = 8
+LOC_BIND_STOP = "。！？；!?;"
+LOC_FWD_CONNECT = ("是", "坐", "在")
+LOC_BACK_CONNECT = ("在", "坐")
+
+
+def _loc_occurrences(text):
+    """按长度降序贪心扫描原文中的位置词，返回 [(start, end, word), ...]。"""
+    occ = []
+    i = 0
+    while i < len(text):
+        for w in LOC_TEXT_WORDS:
+            if text.startswith(w, i):
+                occ.append((i, i + len(w), w))
+                i += len(w)
+                break
+        else:
+            i += 1
+    return occ
+
+
+def _bound_loc_word(text, cand, others):
+    """原文中与 cand 确定性绑定的位置词（最近者优先），无绑定返回 None。
+
+    前向 [loc]…是/坐/在…[name]（『后排左边是我女儿小雨』）；
+    后向 [name]…在/坐…[loc]（『王师傅在主驾』『陈部长，坐在主驾』）。
+    窗口 ≤ LOC_BIND_MAX_GAP 字、不跨句读（。！？；）、不跨越其他赢家出现。
+    """
+    name_s, name_e = cand["start"], cand["end"]
+
+    def region_ok(a, b):
+        if any(ch in LOC_BIND_STOP for ch in text[a:b]):
+            return False
+        for o in others:
+            p = text.find(o["text"])
+            while p >= 0:
+                if p < b and p + len(o["text"]) > a:
+                    return False
+                p = text.find(o["text"], p + 1)
+        return True
+
+    best = None  # (gap, word)
+    for s, e, w in _loc_occurrences(text):
+        if e <= name_s:  # 前向绑定
+            gap = name_s - e
+            if (gap <= LOC_BIND_MAX_GAP and region_ok(e, name_s)
+                    and (gap == 0 or any(k in text[e:name_s]
+                                         for k in LOC_FWD_CONNECT))
+                    and (best is None or gap < best[0])):
+                best = (gap, w)
+        elif s >= name_e:  # 后向绑定
+            gap = s - name_e
+            if (gap <= LOC_BIND_MAX_GAP and region_ok(name_e, s)
+                    and any(k in text[name_e:s] for k in LOC_BACK_CONNECT)
+                    and (best is None or gap < best[0])):
+                best = (gap, w)
+    return best[1] if best else None
+
+
+# v5 规则7 公司/品牌信息提取：常见汽车与互联网公司词典 + 就近绑定到人物。
+# 品牌词是确定性词表、『[品牌]的[人名]』是表层句法——同否定/关系/位置绑定
+# 方法论：代码处理，零模型调用。理想/大众/奔驰/小米/苹果 等与普通词同形的
+# 条目保留（座舱语境下紧邻人名时几乎总是公司义），误绑风险由绑定闸门控制。
+COMPANY_WORDS = (
+    # 汽车整车（合资/自主/新势力）
+    "日产", "吉利", "比亚迪", "特斯拉", "宝马", "奔驰", "奥迪", "大众",
+    "丰田", "本田", "理想", "蔚来", "小鹏", "长城", "奇瑞", "沃尔沃",
+    "马自达", "福特", "现代", "起亚", "零跑", "哪吒", "极氪", "问界",
+    "智界", "享界", "领克", "坦克", "五菱", "红旗", "捷豹", "路虎",
+    "保时捷", "雷克萨斯", "凯迪拉克", "别克", "雪佛兰", "斯巴鲁",
+    "三菱", "标致", "雪铁龙", "斯柯达", "英菲尼迪", "宾利",
+    "劳斯莱斯", "法拉利", "兰博基尼", "迈巴赫",
+    # 汽车供应链/智驾
+    "博世", "采埃孚", "宁德时代", "地平线", "黑芝麻", "亿咖通",
+    "德赛西威", "均胜电子", "禾赛", "速腾聚创", "图达通", "Momenta",
+    # 互联网/科技
+    "阿里巴巴", "阿里", "腾讯", "百度", "华为", "小米", "字节跳动",
+    "字节", "美团", "京东", "网易", "滴滴", "拼多多", "快手",
+    "哔哩哔哩", "大疆", "商汤", "旷视", "科大讯飞", "联想", "海尔",
+    "格力", "微软", "谷歌", "苹果", "亚马逊", "英伟达", "英特尔",
+    "高通", "三星", "台积电", "大众点评",
+)
+# 长度降序 + 字典序（确定性迭代，跨进程一致——set 迭代序受哈希随机化影响）
+COMPANY_WORDS_BY_LEN = tuple(sorted(set(COMPANY_WORDS), key=lambda w: (-len(w), w)))
+COMPANY_BIND_MAX_GAP = 4   # 『日产的小王』gap=1；『日产公司的小王』gap=3
+COMPANY_CONNECT = ("的", "是", "在", "来自", "属于")
+
+
+def _company_spans(text):
+    """文本中全部公司词出现区间 [(start, end), ...]（包含清理与绑定共用）。"""
+    spans = []
+    for w in COMPANY_WORDS_BY_LEN:
+        p = text.find(w)
+        while p >= 0:
+            spans.append((p, p + len(w)))
+            p = text.find(w, p + 1)
+    return spans
+
+
+def _company_for(text, cand, winners):
+    """原文中与 cand 就近绑定的公司/品牌词（最近者优先，同距前向优先），无则 None。
+
+    winners = 全部赢家候选（含 cand 自身）。防误绑三道闸：品牌出现与任何
+    赢家人名重叠不绑（『我是小鹏』不把人名绑成公司）；绑定窗口跨越其他
+    赢家出现不绑（『日产的小王和小李』不给小李绑日产）；gap>0 时窗口须含
+    连接词（的/是/在/来自/属于——『[品牌]的[人名]』主模式，『小王和吉利』不绑）。
+    """
+    name_spans = []
+    for w in winners:
+        p = text.find(w["text"])
+        while p >= 0:
+            name_spans.append((p, p + len(w["text"])))
+            p = text.find(w["text"], p + 1)
+
+    def bindable(a, b, fwd, gap):
+        if gap > COMPANY_BIND_MAX_GAP:
+            return False
+        if any(ch in LOC_BIND_STOP for ch in text[a:b]):
+            return False
+        if any(ns < b and ne > a for ns, ne in name_spans):
+            return False
+        if not (fwd and gap == 0) \
+                and not any(k in text[a:b] for k in COMPANY_CONNECT):
+            return False
+        return True
+
+    best = None  # (gap, rank, word)；rank: 前向0 后向1
+    for word in COMPANY_WORDS_BY_LEN:
+        p = text.find(word)
+        while p >= 0:
+            e = p + len(word)
+            if not any(p < ne and e > ns for ns, ne in name_spans):
+                if e <= cand["start"]:
+                    gap = cand["start"] - e
+                    if bindable(e, cand["start"], True, gap) \
+                            and (best is None or (gap, 0) < (best[0], best[1])):
+                        best = (gap, 0, word)
+                elif p >= cand["end"]:
+                    gap = p - cand["end"]
+                    if bindable(cand["end"], p, False, gap) \
+                            and (best is None or (gap, 1) < (best[0], best[1])):
+                        best = (gap, 1, word)
+            p = text.find(word, p + 1)
+    return best[2] if best else None
 
 
 def _title_split(cands, winner):
@@ -731,7 +963,8 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
     cockpit 路径的问题构造与顺序保持不变。
 
     第 1 轮：全部候选在同一个 choice 的 softmax 内竞争出锚点人物
-    （单候选退化为 noul 阈值门）。第 2 轮：对剩余候选一次性做带
+    （单候选退化为 noul 阈值门；v5：介绍线索紧邻的候选直接作为
+    确定性锚点，跳过模型门控）。第 2 轮：对剩余候选一次性做带
     锚点上下文的 noul 扫描，过阈值者全部保留、重叠者取概率最高。
 
     为什么第 2 轮不用强制选择：实测 laya 的 choice 对『小X』类名字
@@ -746,9 +979,17 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
     # --- 第 1 轮：锚点 ---
     anchor = None
     fallback_winners = None
+    intro = _intro_cued(user_input, cands)
+    brand = None if intro is not None else _brand_cued(user_input, cands)
     t0 = time.perf_counter()
     try:
-        if len(cands) == 1:
+        if intro is not None:
+            # v5 规则5：介绍线索紧邻 → 确定性锚点，跳过模型门控
+            anchor = (intro, None)
+        elif brand is not None:
+            # v5 规则7：『[公司词]的』紧邻引导 → 确定性锚点（『小鹏的周平』）
+            anchor = (brand, None)
+        elif len(cands) == 1:
             c = cands[0]
             ans = backend.ask(user_input, {"pick_is": {
                 "type": "noul",
@@ -793,7 +1034,7 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
     except Exception as e:  # noqa: BLE001
         print(f"Jev 锚点轮失败: {e}")
     t_round1 = time.perf_counter() - t0
-    n_q1 = 1
+    n_q1 = 0 if (intro is not None or brand is not None) else 1
     if anchor is None and not fallback_winners:
         PERF.update({"t_round1": t_round1, "t_round2": 0.0,
                      "n_questions_r1": n_q1, "n_questions_r2": 0,
@@ -805,7 +1046,9 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
         winner_paths = ["fallback"] * len(winners)
     else:
         winners = [anchor]
-        winner_paths = ["single_noul" if len(cands) == 1 else "forced"]
+        winner_paths = ["intro_cue" if intro is not None
+                        else ("brand_cue" if brand is not None
+                              else ("single_noul" if len(cands) == 1 else "forced"))]
 
         # --- 第 2 轮：增量 noul 扫描剩余候选 ---
         a_cand = anchor[0]
@@ -904,8 +1147,20 @@ def _extract_forced(user_input, backend, cands, task="cockpit"):
             loc = "" if loc == NO_LOCATION else loc
             if loc and not loc_evidence:
                 loc = ""
+            if loc:
+                # v5 规则6：原文确定性绑定的座位词与模型回答冲突 → 覆盖。
+                # 座位级绑定词 vs 区域级粗答（后排左边 vs 后排）也覆盖——原文
+                # 证据比模型粗答更具体；同座异名（右后→右后座）保留模型答案
+                others = [c2 for c2, _pw, _sf in split_winners if c2 is not c]
+                bound = _bound_loc_word(user_input, c, others)
+                g_bound = LOC_SEAT_GROUP.get(bound) if bound else None
+                if g_bound and LOC_SEAT_GROUP.get(loc) != g_bound:
+                    loc = bound
+            # v5 规则7：公司/品牌就近绑定（确定性词表，零模型调用）
+            company = _company_for(user_input, c,
+                                   [c2 for c2, _pw, _sf in split_winners]) or ""
             persons.append({"name": c["text"], "identity": ident,
-                            "location": loc})
+                            "location": loc, "company": company})
     PERF.update({"t_round1": t_round1, "t_round2": t_round2,
                  "n_questions_r1": n_q1, "n_questions_r2": n_q2})
     persons.sort(key=lambda p: next(

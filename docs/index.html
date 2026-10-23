@@ -61,6 +61,8 @@
   .person .tag{font-size:12px;color:var(--ds-muted);background:var(--ds-code-bg);border:1px solid var(--ds-border);padding:2px 8px;border-radius:6px}
   .person .tag.loc{color:var(--ds-accent-strong);border-color:var(--ds-accent-ring)}
   .person .tag.id{color:var(--ds-warn);border-color:var(--ds-warn-ring)}
+  .person .tag.co{color:var(--ds-accent-strong);background:var(--ds-accent-soft);border-color:var(--ds-accent-ring)}
+  .person .tag.conf{color:var(--ds-muted);font-variant-numeric:tabular-nums}
   .empty{color:var(--ds-faint);font-size:13.5px;padding:6px 2px}
   .perfline{margin-top:14px;padding-top:12px;border-top:1px solid var(--ds-border);
     font-size:12.5px;color:var(--ds-muted);display:flex;gap:18px;flex-wrap:wrap}
@@ -79,11 +81,15 @@
   .mode-opt .opt-sub{font-size:11.5px;color:var(--ds-muted);line-height:1.45}
   .mode-opt:disabled{opacity:.6;cursor:wait}
 
-  /* ---- 例句按场景分类 ---- */
+  /* ---- 例句分类选项卡 ---- */
+  .cat-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+  .cat-tab{font-size:12.5px;color:var(--ds-muted);background:var(--ds-panel);border:1px solid var(--ds-border);
+    padding:6px 14px;border-radius:8px;cursor:pointer;transition:all .15s;font-family:inherit;font-weight:600}
+  .cat-tab:hover{color:var(--ds-accent);border-color:var(--ds-accent)}
+  .cat-tab.active{color:#fff;background:var(--ds-accent);border-color:var(--ds-accent)}
+  .cat-hint-line{font-size:12px;color:var(--ds-faint);margin-bottom:10px;min-height:16px}
   .example-group{margin-bottom:12px}
   .example-group .examples{margin-bottom:0}
-  .example-cat{font-size:12px;font-weight:600;color:var(--ds-accent-strong);margin-bottom:7px}
-  .example-cat .cat-hint{font-weight:400;color:var(--ds-faint)}
 
   .live-progress{font-size:12px;color:var(--ds-faint);margin-bottom:12px;min-height:16px;line-height:1.5}
   .live-input-row{display:flex;gap:8px;margin-bottom:14px}
@@ -122,7 +128,7 @@
         <h1>座舱人员信息提取 · jevCabin</h1>
         <button class="ds-theme-btn" type="button" onclick="toggleTheme()" aria-label="切换明暗主题"><span class="ds-theme-icon">🌙</span></button>
       </div>
-      <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.944</b>，同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
+      <p class="ds-header__sub">从车载对话中抽取「人物 / 身份 / 座位位置 / 公司品牌」的结构化信息。用类型化决策模型（laya-multilingual）替代 2000-token 巨型 prompt，在 510 条模板构造集（seed=42 构造即标注）上把人名 F1 从 0.793 提到 <b class="best">0.964</b>（追平远端 LLM），同时比旧管线快 <b class="best">17 倍</b>、零 token 成本。</p>
       <div class="ie-badges">
         <span class="ie-badge">laya-multilingual · mmBERT 322M</span>
         <span class="ie-badge">纯本地推理</span>
@@ -137,7 +143,7 @@
     <!-- ============ 演示 ============ -->
     <section class="ds-section" id="demo">
       <h2 class="ds-h2">演示</h2>
-      <p class="sec-note">点下面的例句，看座舱图实时点亮对应座位。</p>
+      <p class="sec-note">选推理模式与例句分类，点例句看座舱图点亮对应座位。</p>
       <div class="grid2">
         <div class="card cabin-card">
           <h3>座舱视图</h3>
@@ -192,6 +198,8 @@
             <button id="live-go">提取</button>
           </div>
           <h3 style="margin-top:6px">例句 · 按场景分类</h3>
+          <div class="cat-tabs" id="cat-tabs" role="tablist" aria-label="例句分类"></div>
+          <div class="cat-hint-line" id="cat-hint"></div>
           <div id="examples"></div>
           <div class="quote" id="quote">← 点上面任意例句</div>
 
@@ -199,15 +207,15 @@
           <div class="persons" id="persons"><div class="empty">等待选择例句…</div></div>
 
           <div class="perfline" id="perfline">
-            <span>延迟 <b id="m-lat">–</b></span>
-            <span>候选 <b id="m-cand">–</b></span>
-            <span>选择轮问题 <b id="m-r1">–</b></span>
-            <span>属性轮问题 <b id="m-r2">–</b></span>
+            <span title="端到端提取耗时：从输入到结构化输出。回放 = Apple M4 Pro 上 Python 管线的固化实测；实时 = 你的浏览器内 JS 管线实测（首条含预热）">延迟 <b id="m-lat">–</b></span>
+            <span title="代码层生成并通过否定门控的人名候选数（不进模型的品牌词/方位词已被姓氏过滤挡掉）">候选 <b id="m-cand">–</b></span>
+            <span title="第一轮模型问题数（强制选择 / 单人门控；0 = 介绍/品牌线索由代码直接判定，零模型调用）">选择轮问题 <b id="m-r1">–</b></span>
+            <span title="第二轮属性问题数（每个赢家 location + identity 两问）">属性轮问题 <b id="m-r2">–</b></span>
           </div>
           <p class="replay-note">
-            ⚠️ 上方两种模式跑的是<b>同一套 v4 管线</b>（JS 移植，与 Python 输出 51 条对拍 50/51 逐字节一致），
+            ⚠️ 上方两种模式跑的是<b>同一套 v5 管线</b>（JS 移植，与 Python 输出 51 条对拍 <b>51/51 逐字节一致</b>），
             区别只在推理发生的位置：<b>预录制回放</b> = 结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化
-            （2026-10-22 已逐条复核一致）；<b>浏览器实时推理</b> = 模型（~678MB fp16，国内自动走 hf-mirror；
+            （2026-10-23 已用 v5 管线逐条重跑）；<b>浏览器实时推理</b> = 模型（~678MB fp16，国内自动走 hf-mirror；
             无持久缓存，每次启用需重新下载）下载进你的浏览器后完全本地推理——零服务器、零 token 成本、隐私不出浏览器。
           </p>
         </div>
@@ -356,35 +364,45 @@ python demo/server.py                  # 启动时预加载模型，约 3-5s
 <script>
 "use strict";
 // ===== 预录回放数据：由真实 laya 推理产出后固化（Apple M4 Pro）；
-// ===== 2026-10-22 已用 v4 管线逐条复核，输出（人物/身份/位置/问题数）逐项一致
+// ===== 2026-10-23 已用 v5 管线逐条重跑固化（winners = 人物判定路径与模型概率，
+// ===== intro_cue 为代码确定性判定、无模型概率）
 const REPLAY = [
- {"text":"副驾坐的是日产的小王","elapsed_ms":257.4,
-  "persons":[{"name":"小王","identity":"","location":"副驾"}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2}},
- {"text":"司机王师傅在主驾","elapsed_ms":46.6,
-  "persons":[{"name":"王师傅","identity":"司机","location":"主驾"}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2}},
- {"text":"副驾是我同事小刘","elapsed_ms":51.1,
-  "persons":[{"name":"小刘","identity":"同事","location":"副驾"}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2}},
- {"text":"我是陈部长，坐在主驾","elapsed_ms":49.4,
-  "persons":[{"name":"陈部长","identity":"","location":"主驾"}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2}},
- {"text":"副驾是我女儿小雨，后排左边是我儿子小宝","elapsed_ms":89.8,
-  "persons":[{"name":"小雨","identity":"","location":"副驾"},
-             {"name":"小宝","identity":"","location":"后排左边"}],
-  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":5}},
- {"text":"后排坐着张总和王经理","elapsed_ms":117.2,
-  "persons":[{"name":"张总","identity":"","location":"后排"},
-             {"name":"王经理","identity":"","location":"后排"}],
-  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":4}},
- {"text":"我不是陈总，我叫陈部长，坐在主驾","elapsed_ms":44.4,
-  "persons":[{"name":"陈部长","identity":"","location":"主驾"}],
-  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2}},
+ {"text":"副驾坐的是日产的小王","elapsed_ms":26.5,
+  "persons":[{"name":"小王","identity":"","location":"副驾","company":"日产"}],
+  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
+  "winners":[["小王",null,"brand_cue"]]},
+ {"text":"司机王师傅在主驾","elapsed_ms":41.4,
+  "persons":[{"name":"王师傅","identity":"司机","location":"主驾","company":""}],
+  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},
+  "winners":[["王师傅",0.9349,"single_noul"]]},
+ {"text":"副驾是我同事小刘","elapsed_ms":41.5,
+  "persons":[{"name":"小刘","identity":"同事","location":"副驾","company":""}],
+  "perf":{"n_candidates":1,"n_questions_r1":1,"n_questions_r2":2},
+  "winners":[["小刘",0.7261,"single_noul"]]},
+ {"text":"我是陈部长，坐在主驾","elapsed_ms":26.2,
+  "persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],
+  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
+  "winners":[["陈部长",null,"intro_cue"]]},
+ {"text":"副驾是我女儿小雨，后排左边是我儿子小宝","elapsed_ms":101.8,
+  "persons":[{"name":"小雨","identity":"","location":"副驾","company":""},
+             {"name":"小宝","identity":"","location":"后排左边","company":""}],
+  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":5},
+  "winners":[["小雨",0.6638,"forced"],["小宝",0.9531,"scan"]]},
+ {"text":"后排坐着张总和王经理","elapsed_ms":108.9,
+  "persons":[{"name":"张总","identity":"","location":"后排","company":""},
+             {"name":"王经理","identity":"","location":"后排","company":""}],
+  "perf":{"n_candidates":2,"n_questions_r1":1,"n_questions_r2":4},
+  "winners":[["王经理",0.7967,"fallback"],["张总",0.6024,"fallback"]]},
+ {"text":"我不是陈总，我叫陈部长，坐在主驾","elapsed_ms":33.6,
+  "persons":[{"name":"陈部长","identity":"","location":"主驾","company":""}],
+  "perf":{"n_candidates":1,"n_questions_r1":0,"n_questions_r2":2},
+  "winners":[["陈部长",null,"intro_cue"]]},
  {"text":"车里没有人","elapsed_ms":0.0,"persons":[],
-  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0}},
+  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},
+  "winners":[]},
  {"text":"帮我打开空调","elapsed_ms":0.0,"persons":[],
-  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0}}
+  "perf":{"n_candidates":0,"n_questions_r1":0,"n_questions_r2":0},
+  "winners":[]}
 ];
 
 // location 值 → 具体座位（对应 jev_extract.LOCATION_OPTIONS）
@@ -434,14 +452,26 @@ function renderCabin(persons){
         : "已点亮对应座位");
 }
 
-function renderPersons(persons){
+// 赢家判定路径 → 展示标签（置信度 = 该人物 is_person 判定的模型概率；
+// intro_cue 为代码确定性判定，无模型概率）
+const PATH_LABELS = {forced:"强制选择", scan:"增量扫描", single_noul:"单人门控",
+                     fallback:"回退扫描", intro_cue:"介绍线索", brand_cue:"品牌线索"};
+
+function renderPersons(persons, winners){
+  const wmap = {};
+  (winners || []).forEach(([n, p, path]) => { wmap[n] = [p, path]; });
   const box = $("persons");
   if(!persons.length){ box.innerHTML = '<div class="empty">未检测到人物（负例正确）</div>'; return; }
   box.innerHTML = persons.map(p => {
     const loc = p.location ? `<span class="tag loc">${esc(p.location)}</span>`
                            : '<span class="tag">位置未提及</span>';
     const id  = p.identity ? `<span class="tag id">${esc(p.identity)}</span>` : "";
-    return `<div class="person"><span class="dot"></span><span class="name">${esc(p.name)}</span>${loc}${id}</div>`;
+    const co  = p.company ? `<span class="tag co" title="就近绑定的公司/品牌（代码词表匹配，零模型调用）">🏢 ${esc(p.company)}</span>` : "";
+    const w = wmap[p.name];
+    const conf = w
+      ? `<span class="tag conf" title="人物判定的来源路径与模型概率（is_person）">${PATH_LABELS[w[1]] || esc(w[1])}${w[0] != null ? " " + w[0].toFixed(2) : " · 代码判定"}</span>`
+      : "";
+    return `<div class="person"><span class="dot"></span><span class="name">${esc(p.name)}</span>${loc}${id}${co}${conf}</div>`;
   }).join("");
 }
 
@@ -449,7 +479,7 @@ function play(i){
   const d = REPLAY[i];
   document.querySelectorAll(".chip").forEach((c,k)=>c.classList.toggle("active",k===i));
   $("quote").textContent = d.text;
-  renderPersons(d.persons);
+  renderPersons(d.persons, d.winners);
   renderCabin(d.persons);
   const pf = d.perf || {};
   $("m-lat").textContent  = d.elapsed_ms + " ms";
@@ -458,7 +488,8 @@ function play(i){
   $("m-r2").textContent   = pf.n_questions_r2 ?? "–";
 }
 
-// 例句场景分类（索引指向 REPLAY；各组按序拼接后 chip 的 DOM 顺序仍 = REPLAY 下标 0..8，
+// 例句场景分类（选项卡：选中哪类只展示哪类。索引指向 REPLAY；未选中组只是
+// display:none 不移出 DOM，chip 的 DOM 顺序仍 = REPLAY 下标 0..8，
 // play() 里按 querySelectorAll(".chip") 序号定位 active 状态依然成立）
 const CATS = [
   { label:"单人", hint:"身份提取 · 品牌词不误报 · 自我介绍", idx:[0,1,2,3] },
@@ -480,14 +511,22 @@ function dispatch(i, chipEl){
   }
 }
 
-const exBox = $("examples");
-CATS.forEach(cat => {
+const exBox = $("examples"), tabBox = $("cat-tabs"), hintLine = $("cat-hint");
+function selectCat(ci){
+  tabBox.querySelectorAll(".cat-tab").forEach((t,k)=>t.classList.toggle("active",k===ci));
+  hintLine.textContent = CATS[ci].hint;
+  exBox.querySelectorAll(".example-group").forEach((g,k)=>{
+    g.style.display = (k===ci) ? "" : "none";
+  });
+}
+CATS.forEach((cat, ci) => {
+  const t = document.createElement("button");
+  t.className = "cat-tab"; t.textContent = cat.label;
+  t.setAttribute("role", "tab");
+  t.onclick = () => selectCat(ci);
+  tabBox.appendChild(t);
   const g = document.createElement("div");
   g.className = "example-group";
-  const h = document.createElement("div");
-  h.className = "example-cat";
-  h.innerHTML = `${cat.label} <span class="cat-hint">· ${cat.hint}</span>`;
-  g.appendChild(h);
   const row = document.createElement("div");
   row.className = "examples";
   cat.idx.forEach(i => {
@@ -499,7 +538,8 @@ CATS.forEach(cat => {
   g.appendChild(row);
   exBox.appendChild(g);
 });
-play(1);   // 默认展示带身份提取的那条
+selectCat(0);
+play(1);   // 默认展示带身份提取的那条（在默认分类「单人」内）
 </script>
 
 <script type="module">
@@ -528,7 +568,7 @@ function setOpts(mode){
 }
 
 function replayStatus(){
-  prog.textContent = "预录回放：结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化（2026-10-22 已用 v4 管线逐条复核一致）。点例句即看。";
+  prog.textContent = "预录回放：结果由真实 laya-multilingual 在 Apple M4 Pro 上跑出后固化（2026-10-23 已用 v5 管线逐条重跑）。点例句即看。";
 }
 
 async function selectLive(){
@@ -595,7 +635,7 @@ async function livePlay(text, chipEl) {
   $m("persons").innerHTML = '<div class="empty">推理中…</div>';
   try {
     const r = await extract(text);
-    renderPersons(r.persons);
+    renderPersons(r.persons, r.perf.winners);
     renderCabin(r.persons);
     $m("m-lat").textContent = r.elapsedMs.toFixed(0) + " ms";
     $m("m-cand").textContent = r.perf.nCandidates;

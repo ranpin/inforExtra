@@ -1,10 +1,11 @@
 /**
- * 端到端对拍：浏览器内用 q8 模型跑 JS 管线（pipeline.js），
- * 与 Python 管线在 51 条真实种子集上的输出逐条 JSON 全等比较。
- * gold = web/public/parity51.json（由 test/results/原始51_laya强制选择v4.xlsx 生成）。
+ * 端到端对拍：浏览器内跑 JS 管线（pipeline.js），与 Python 管线在 51 条
+ * 真实种子集上的输出逐条 JSON 全等比较。模型走 live.js 的 URL 直连路径
+ * （fp16 ~678MB，hf.co 探活失败自动切 hf-mirror）——与展示页发货路径一致。
+ * gold = web/public/parity51.json（由 v5 Python 管线对 test/测试集.xlsx 重跑生成）。
  * 结果挂 window.__PARITY，完成置 window.__DONE。
  */
-import { load } from "@johnhenry/laya";
+import { loadModel } from "./live.js";
 import { extractEntities } from "./pipeline.js";
 
 const logEl = document.getElementById("log");
@@ -16,14 +17,14 @@ const log = (s) => {
 async function main() {
   const data = await (await fetch("/parity51.json")).json();
   log(`sentences: ${data.length}`);
-  log("loading model (laya-multilingual q8, self-hosted)...");
+  log("loading model (laya-multilingual fp16, URL route via live.js)...");
   const t0 = performance.now();
-  const agent = await load(location.origin + "/models/laya-q8/", {
-    onProgress: (p) => {
+  const agent = await loadModel((p) => {
+    if (p && p.loaded !== undefined) {
       try {
-        logEl.textContent = "loading... " + JSON.stringify(p).slice(0, 140) + "\n";
+        logEl.textContent = `loading... ${p.file || ""} ${(p.loaded / 1e6).toFixed(0)}MB\n`;
       } catch (_) { /* ignore */ }
-    },
+    }
   });
   const loadSeconds = (performance.now() - t0) / 1000;
   const backendName =

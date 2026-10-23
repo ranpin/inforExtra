@@ -8,7 +8,7 @@ UPDATE/SUPERSEDE 的提取侧信号。两项目保持边界不合并；本集只
 gold 约定：关系只认表层措辞（我→本人，妻子/儿子→家人，同事/朋友按原话），
 未说明→未提及；身份只收职业称谓（同事/朋友归关系问题）；称谓留名中（王医生→身份空）。
 gold 由构造时确定（构造即标注）。指标 = 人名级 P/R/F1 + 关系/身份准确率 + 行级全对。
-产物：test/通用集.xlsx / test/通用集_gold.xlsx / test/results/通用集_laya_v4.xlsx
+产物：test/通用集.xlsx / test/通用集_gold.xlsx / test/results/通用集_laya_v5.xlsx
 用法：.venv/bin/python eval_general.py
 """
 import json
@@ -266,9 +266,9 @@ def main():
     ws.append(["族", "用户输入", "gold", "预测"])
     for row in all_rows:
         ws.append(list(row))
-    wb.save("test/results/通用集_laya_v4.xlsx")
+    wb.save("test/results/通用集_laya_v5.xlsx")
     print("\n产物已写入 test/通用集.xlsx, test/通用集_gold.xlsx, "
-          "test/results/通用集_laya_v4.xlsx")
+          "test/results/通用集_laya_v5.xlsx")
 
 
 if __name__ == "__main__":

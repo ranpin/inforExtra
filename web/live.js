@@ -91,7 +91,10 @@ export async function extract(text) {
   return {
     persons: r.persons,
     elapsedMs: performance.now() - t0,
-    perf: { nCandidates: PERF.nCandidates, nQ1: PERF.nQ1, nQ2: PERF.nQ2 },
+    perf: {
+      nCandidates: PERF.nCandidates, nQ1: PERF.nQ1, nQ2: PERF.nQ2,
+      winners: PERF.winners,
+    },
   };
 }
 
